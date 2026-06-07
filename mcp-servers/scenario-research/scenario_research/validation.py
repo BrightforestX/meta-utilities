@@ -11,7 +11,12 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from .agent_compiler import compile_agent_for_role, compile_scenario_spec, load_roles
+from .agent_compiler import (
+    compile_agent_for_role,
+    compile_scenario_spec,
+    load_roles,
+    resolve_ontology_base,
+)
 from .models import ScenarioRun
 
 
@@ -59,8 +64,12 @@ def _validate_param_value(name: str, spec: dict[str, Any], value: Any) -> None:
         })
 
 
-def _validate_scenario_params(scenario: str, runtime_params: dict[str, Any]) -> None:
-    spec = compile_scenario_spec(scenario)
+def _validate_scenario_params(
+    scenario: str,
+    runtime_params: dict[str, Any],
+    ontology_base: Path | None = None,
+) -> None:
+    spec = compile_scenario_spec(scenario, ontology_base=ontology_base)
     defs = spec.get("parameters", {}) or {}
     unknown = sorted([k for k in runtime_params.keys() if k not in defs])
     if unknown:
@@ -113,13 +122,15 @@ def validate_before_run(
     n_steps: int | None = None,
     n_agents: int | None = None,
     parameters: dict[str, Any] | None = None,
+    ontology_ref: str | None = None,
 ) -> None:
     """Call at the top of any scenario execution path. Raises on invalid config/yaml."""
     # For P3 we validate that the governed roles yamls in the package/ontology are loadable
     # and that the chosen scenario's implied agent compiles.
     # oteemo_billable uses its own distinct leadership_decision roles (Raja, Arka, Rod, Clifford).
     try:
-        roles = load_roles()
+        ontology_base = resolve_ontology_base(ontology_ref) if ontology_ref else None
+        roles = load_roles(ontology_base=ontology_base)
         if not roles:
             raise RuntimeError("governed roles yaml not loadable")
         if scenario == "oteemo_billable":
@@ -129,7 +140,7 @@ def validate_before_run(
             compile_agent_for_role("arkaprava_chaudhuri_vp_tech", ontology_base=oteemo_base)
             compile_agent_for_role("clifford_dalson_axiom_finops", ontology_base=oteemo_base)
         else:
-            compile_agent_for_role("oasis_agent")
+            compile_agent_for_role("oasis_agent", ontology_base=ontology_base)
 
         runtime_params: dict[str, Any] = {}
         if n_steps is not None:
@@ -140,7 +151,7 @@ def validate_before_run(
             runtime_params["seed"] = seed
         if parameters:
             runtime_params.update(parameters)
-        _validate_scenario_params(scenario, runtime_params)
+        _validate_scenario_params(scenario, runtime_params, ontology_base=ontology_base)
     except Exception as exc:
         err = {"code": "AGENT_YAML_INVALID", "message": str(exc), "scenario": scenario}
         raise ValueError(err) from exc

@@ -256,6 +256,27 @@ def test_p2_deterministic_scenario_compiler_output():
     assert '"name":"info_spread"' in c1
 
 
+def test_p2_ontology_reference_resolution_by_folder_and_linkml_name():
+    from scenario_research.agent_compiler import resolve_ontology_base
+    folder = resolve_ontology_base("agents")
+    by_name = resolve_ontology_base("odrs_agents")
+    assert folder == by_name
+    assert folder.name == "agents"
+
+
+def test_p3_validate_before_run_accepts_linkml_name_reference():
+    from scenario_research.validation import validate_before_run
+    # using LinkML "name: odrs_agents" should resolve to ontology/agents
+    validate_before_run("info_spread", n_steps=2, n_agents=36, seed=42, ontology_ref="odrs_agents")
+
+
+def test_p3_validate_before_run_rejects_unknown_ontology_reference():
+    from scenario_research.validation import validate_before_run
+    with pytest.raises(ValueError) as e:
+        validate_before_run("info_spread", n_steps=2, n_agents=36, seed=42, ontology_ref="no_such_ontology")
+    assert "unknown ontology reference" in str(e.value)
+
+
 def test_p3_validate_before_run_rejects_out_of_bounds_scenario_param():
     from scenario_research.validation import validate_before_run
     with pytest.raises(ValueError) as e:
@@ -392,4 +413,32 @@ def test_oteemo_leadership_roles_compile_only_with_oteemo_base():
         assert spec["name"] == name
         assert "odrs-agents/1" in spec.get("source", "")
         assert spec.get("kind") in ("leadership_decision", "specialist_contributor")
+
+
+def test_cli_aliases_and_short_flags_cover_simplified_commands():
+    import subprocess
+    import sys
+
+    base = [sys.executable, "-m", "scenario_research.cli"]
+
+    out_v = subprocess.check_output(base + ["v"], text=True)
+    assert "scenario-research 0.1.0" in out_v
+
+    out_h = subprocess.check_output(base + ["h"], text=True)
+    assert "'ok': True" in out_h
+
+    out_onts = subprocess.check_output(base + ["ontologies"], text=True)
+    assert "'folder': 'agents'" in out_onts
+    assert "'linkml_name': 'odrs_agents'" in out_onts
+
+    out_run = subprocess.check_output(
+        base + ["r", "oteemo_billable", "-a", "4", "-n", "2", "-s", "42", "-o", "odrs_agents"],
+        text=True,
+    )
+    assert "'scenario': 'oteemo_billable'" in out_run
+    assert "'status': 'succeeded'" in out_run
+
+    # Defaults are now ontology-driven; this should not fail on n_agents validation.
+    out_run_defaults = subprocess.check_output(base + ["run", "oteemo_billable"], text=True)
+    assert "'status': 'succeeded'" in out_run_defaults
 

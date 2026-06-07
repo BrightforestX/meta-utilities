@@ -71,9 +71,10 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
 @mcp.tool()
 async def run_scenario(
     scenario: str,
-    n_agents: int = 50,
+    n_agents: int | None = None,
     n_steps: int = 10,
     seed: int | None = 42,
+    ontology: str | None = None,
     ctx: Context | None = None,
 ) -> ScenarioRun:
     """Run a governed scenario (delegates to camel-oasis-scaffold for social scenarios; oteemo_billable is self-contained local using governed leadership roles + discrete firm sim).
@@ -83,7 +84,13 @@ async def run_scenario(
     Returns a populated ScenarioRun (status, db_path, error if any).
     """
     # P3: block on invalid governed yaml/config before any scaffold work
-    validate_before_run(scenario, seed=seed, n_steps=n_steps, n_agents=n_agents)
+    validate_before_run(
+        scenario,
+        seed=seed,
+        n_steps=n_steps,
+        n_agents=n_agents,
+        ontology_ref=ontology,
+    )
 
     # Note: n_agents is advisory here; the scaffold profiles determine population size.
     # Real enforcement / population_templates come in P2 ontology layer.

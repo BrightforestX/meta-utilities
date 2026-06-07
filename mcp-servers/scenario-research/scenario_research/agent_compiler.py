@@ -15,8 +15,74 @@ import yaml
 
 from .scaffold_adapter import get_scaffold_root
 
-PACKAGE_ONTOLOGY = Path(__file__).resolve().parents[1] / "ontology" / "agents"
+PACKAGE_ONTOLOGY_ROOT = Path(__file__).resolve().parents[1] / "ontology"
+PACKAGE_ONTOLOGY = PACKAGE_ONTOLOGY_ROOT / "agents"
 OTEEMO_ONTOLOGY = Path(__file__).resolve().parents[1] / "oteemo" / "ontology" / "agents"
+
+
+def _safe_scaffold_ontology_root() -> Path | None:
+    try:
+        return get_scaffold_root() / "ontology"
+    except Exception:
+        return None
+
+
+def list_ontology_refs() -> list[dict[str, str]]:
+    """List discoverable ontology references (folder + LinkML name).
+
+    Supports user-facing ontology references by either:
+    - folder name under ontology/
+    - LinkML `name` field in the ontology's linkml yaml
+    """
+    refs: list[dict[str, str]] = []
+    roots = [PACKAGE_ONTOLOGY_ROOT]
+    scaffold_root = _safe_scaffold_ontology_root()
+    if scaffold_root is not None:
+        roots.append(scaffold_root)
+
+    seen_folders: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            if child.name in seen_folders:
+                continue
+
+            linkml_name = ""
+            for candidate in ("linkml_schema.yaml", "linkml_data_model.yaml"):
+                f = child / candidate
+                if f.exists():
+                    try:
+                        doc = yaml.safe_load(f.read_text()) or {}
+                        linkml_name = str(doc.get("name", "")).strip()
+                    except Exception:
+                        linkml_name = ""
+                    break
+            refs.append({
+                "folder": child.name,
+                "linkml_name": linkml_name,
+                "path": str(child),
+            })
+            seen_folders.add(child.name)
+    return refs
+
+
+def resolve_ontology_base(reference: str | None) -> Path:
+    """Resolve ontology reference by folder name or LinkML `name`."""
+    if reference is None or reference.strip() == "":
+        return PACKAGE_ONTOLOGY
+
+    ref = reference.strip()
+    direct = Path(ref)
+    if direct.exists() and direct.is_dir():
+        return direct.resolve()
+
+    for row in list_ontology_refs():
+        if row["folder"] == ref or row["linkml_name"] == ref:
+            return Path(row["path"]).resolve()
+    raise ValueError(f"unknown ontology reference {reference!r}")
 
 
 def _load_yaml(name: str, ontology_base: Path | None = None) -> dict[str, Any]:
@@ -26,7 +92,10 @@ def _load_yaml(name: str, ontology_base: Path | None = None) -> dict[str, Any]:
     bases: list[Path] = []
     if ontology_base:
         bases.append(ontology_base)
-    bases += [PACKAGE_ONTOLOGY, get_scaffold_root() / "ontology" / "agents"]
+    bases.append(PACKAGE_ONTOLOGY)
+    scaffold_root = _safe_scaffold_ontology_root()
+    if scaffold_root is not None:
+        bases.append(scaffold_root / "agents")
     for base in bases:
         p = base / name
         if p.exists():
