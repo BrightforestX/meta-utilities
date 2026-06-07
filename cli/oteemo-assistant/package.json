@@ -13,10 +13,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@assistant-ui/react-ink": "^0.0.23",
+    "@assistant-ui/react-ink-markdown": "^0.0.22",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "assistant-cloud": "^0.1.31",
+    "execa": "^9.0.0",
     "ink": "^5.0.1",
     "react": "^18.3.1",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "execa": "^9.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

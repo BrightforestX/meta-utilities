@@ -29,3 +29,8 @@ def get_typed_helpers() -> dict[str, Any]:
     return {"note": "wire to surreal_vector_client + SurrealHTTP when SURREAL_URL healthy"}
 
 # Idempotent reconcile / migration hook (like px tenancy) would live here.
+
+# --- Weaviate peer (additive, first-cut) ---
+# See linkml_weaviate.py: ensure_weaviate_collections_from_linkml(linkml_path, client=None)
+# Called automatically by ontology_ingest when LinkML files are seen; also usable directly.
+# This does NOT replace or affect the Surreal governance path above.

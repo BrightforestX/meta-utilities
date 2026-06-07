@@ -10,8 +10,8 @@ export type LeaderRec = {
 
 export function LeaderCard({ rec }: { rec: LeaderRec }) {
   return (
-    <Box borderStyle="round" paddingX={1} marginBottom={1} flexDirection="column">
-      <Text bold color="cyan">{rec.name} — {rec.role}</Text>
+    <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={0} flexDirection="column">
+      <Text bold color="cyan">▶ {rec.name} — {rec.role}</Text>
       <Text>{rec.rec}</Text>
       {rec.metric ? <Text dimColor>metric: {rec.metric}</Text> : null}
     </Box>

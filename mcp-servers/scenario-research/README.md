@@ -74,6 +74,17 @@ All changes follow Red (failing test/spec first) -> Green -> Refactor.
 BDD features live under `tests/bdd/` (or root tests) and map to ACs.
 PRs must include updated contract snapshots or new Given/When/Then when behavior changes.
 
+## Ontology recall (new first-cut)
+- `scenario-research ingest-ontology --target weaviate` (or `python -m scenario_research.ontology_ingest`)
+- `scenario-research search-ontology "finops"`
+- Walks shared ontology/ + oteemo/ontology/ (roles/policies/tools + LinkML classes/attrs).
+- Maintains `meta_ontology` (configurable via RESEARCH_ONTOLOGY_COLLECTION) + ensures LinkML-derived collections (additive to Surreal).
+- Chunks + embeds + inserts with stable IDs; idempotent clear-by-source for first-cut.
+- Graceful: clear messages if Weaviate or [research] extra absent; disk YAMLs are source of truth.
+- MCP surface: `ingest_ontology`, `search_ontology` (two-layer timeout wrapped).
+- TUI (oteemo-assistant): `ingest ontology`, `show ontology MemoryItem|raja_gudepu_ceo`, `ontology search ...` (cards + markdown; status bar MODE update).
+See ontology_ingest.py + linkml_weaviate.py + oteemo-assistant README for usage + verification.
+
 ## Oteemo billable maximization (example real-org scenario)
 
 A self-contained, governed scenario exercising the full ODRS stack for a federal SI leadership question:

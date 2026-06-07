@@ -14,6 +14,7 @@ Two-layer timeouts documented in package README and templates.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -26,6 +27,10 @@ from .router import resolve_endpoint, get_model_for_role
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
+
+# Ontology recall (Weaviate first-cut; additive, disk YAMLs remain source of truth)
+from .ontology_ingest import ingest_ontology as _ingest_ontology_impl, search_ontology as _search_ontology_impl
+from . import ontology_ingest as _ontology_ingest_mod  # for health surface + direct CLI entrypoint discovery
 
 # Client timeout for long simulation/research loops (OASIS runs + workforce ask)
 # Host (grok/cursor) also sets tool_timeouts[scenario_research_*] (see LONG_RUNNING_TOOLS)
@@ -46,8 +51,12 @@ mcp = FastMCP(
         "Use scenario_research tools for running governed CAMEL-OASIS simulations, fitting mathematical models, "
         "producing costed research reports, and (via batch-orchestrator) scaling replicate ensembles. "
         "All agent roles, tools, policies, and population templates are declared in governed YAML under the ontology layer. "
+        "New: first-class ontology recall via Weaviate (meta_ontology collection) with ingest_ontology + search_ontology. "
+        "Disk YAMLs (ontology/ + oteemo/ontology/) remain the source of truth; Weaviate is semantic recall/RAG only. "
+        "LinkML -> Weaviate collections (additive to Surreal path). "
         "Two-layer timeouts: SCENARIO_RESEARCH_TIMEOUT_SEC (client) + host tool_timeouts entry. "
-        "PostgreSQL is optional; SQLite is the portable default baseline."
+        "PostgreSQL is optional; SQLite is the portable default baseline. "
+        "Pure simulation and all prior flows unaffected if Weaviate/research extra absent."
     ),
 )
 
@@ -64,7 +73,14 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
             "planner": resolve_endpoint("planner"),
             "model_oasis": get_model_for_role("oasis_agent"),
         },
-        "contracts": ["ScenarioRun", "ModelFitResult", "CostReport", "ResearchReport"],
+        "contracts": ["ScenarioRun", "ModelFitResult", "CostReport", "ResearchReport", "OntologyChunk", "LinkMLClass"],
+        "ontology": {
+            "ingest_tool": "ingest_ontology",
+            "search_tool": "search_ontology",
+            "default_collection": "meta_ontology",
+            "env_override": "RESEARCH_ONTOLOGY_COLLECTION | WEAVIATE_ONTOLOGY_COLLECTION",
+            "graceful": "if Weaviate/research extra absent: clear msg; disk YAMLs + pure-sim 100% functional",
+        },
     }
 
 
@@ -127,6 +143,48 @@ async def validate_agent_yaml(yaml_text: str, ctx: Context | None = None) -> dic
 # - ask(question) -> ResearchReport
 # - get_cost_report(run_id) -> CostReport
 # - fit_models(db_path, models) -> list[ModelFitResult]
+
+# --- Ontology recall layer (Weaviate first-cut; thin surface, heavy in ontology_ingest) ---
+@mcp.tool()
+async def ingest_ontology(target: str = "weaviate", paths: list[str] | None = None, ctx: Context | None = None) -> dict[str, Any]:
+    """
+    Walk shared ontology/ + oteemo/ontology/ (or explicit paths), chunk governed roles/policies/tools + LinkML classes/attrs,
+    ensure meta_ontology (and LinkML-derived) Weaviate collections, embed+insert with stable ids + source tags.
+    Idempotent first-cut: clears prior objects for the walked sources before insert.
+    Source of truth remains the YAMLs on disk (git). Weaviate is for semantic recall/RAG only.
+    Graceful if Weaviate or [research] extra unavailable.
+    Two-layer timeout protected (client SCENARIO_RESEARCH_TIMEOUT_SEC + host tool_timeouts.ingest_ontology).
+    """
+    try:
+        async with asyncio.timeout(SCENARIO_RESEARCH_TIMEOUT_SEC):
+            return await _ingest_ontology_impl(target=target, paths=paths, ctx=ctx)
+    except asyncio.TimeoutError:
+        logger.warning("ingest_ontology timed out after %ss", SCENARIO_RESEARCH_TIMEOUT_SEC)
+        if ctx:
+            try:
+                await ctx.error(f"timeout after {SCENARIO_RESEARCH_TIMEOUT_SEC}s")
+            except Exception:
+                pass
+        return {"ok": False, "error": "timeout", "collection": _ontology_ingest_mod.COLLECTION}
+
+@mcp.tool()
+async def search_ontology(query: str, top_k: int = 5, ctx: Context | None = None) -> list[dict[str, Any]]:
+    """
+    Semantic (near_vector) search over the meta_ontology Weaviate collection (ontology chunks).
+    Returns ranked hits with source, entity_type (role/policy/tool/class/attribute), name, text snippet, tags.
+    If Weaviate unavailable, returns a single graceful error item (disk sources remain canonical).
+    """
+    try:
+        async with asyncio.timeout(min(SCENARIO_RESEARCH_TIMEOUT_SEC, 60.0)):
+            return await _search_ontology_impl(query=query, top_k=top_k, ctx=ctx)
+    except asyncio.TimeoutError:
+        logger.warning("search_ontology timed out")
+        if ctx:
+            try:
+                await ctx.error("search timed out")
+            except Exception:
+                pass
+        return [{"error": "timeout"}]
 
 
 def main() -> None:
