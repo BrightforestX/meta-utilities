@@ -22,6 +22,7 @@ from typing import Any
 from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
+from .observability import traced
 from .router import resolve_endpoint, get_model_for_role
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
@@ -83,23 +84,62 @@ async def run_scenario(
     The MCP surface stays thin. oteemo_billable uses ontology-derived LeadershipRoles (Raja FinOps, Arka arch, Rod delivery) as distinct decision agents.
     Returns a populated ScenarioRun (status, db_path, error if any).
     """
-    # P3: block on invalid governed yaml/config before any scaffold work
-    validate_before_run(
-        scenario,
-        seed=seed,
-        n_steps=n_steps,
-        n_agents=n_agents,
-        ontology_ref=ontology,
+    trace = traced(
+        name="scenario_research.mcp.run_scenario",
+        inputs={
+            "scenario": scenario,
+            "n_agents": n_agents,
+            "n_steps": n_steps,
+            "seed": seed,
+            "ontology": ontology,
+        },
+        metadata={"surface": "mcp"},
     )
+    try:
+        # P3: block on invalid governed yaml/config before any scaffold work
+        validate_before_run(
+            scenario,
+            seed=seed,
+            n_steps=n_steps,
+            n_agents=n_agents,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="validate_before_run",
+            inputs={
+                "scenario": scenario,
+                "seed": seed,
+                "n_steps": n_steps,
+                "n_agents": n_agents,
+                "ontology_ref": ontology,
+            },
+            outputs={"valid": True},
+            reasoning_summary="Validated governed inputs before invoking scenario runtime.",
+        )
 
-    # Note: n_agents is advisory here; the scaffold profiles determine population size.
-    # Real enforcement / population_templates come in P2 ontology layer.
-    result = await execute_scenario(
-        scenario,
-        n_steps=n_steps,
-        seed=seed,
-    )
-    return result
+        # Note: n_agents is advisory here; the scaffold profiles determine population size.
+        # Real enforcement / population_templates come in P2 ontology layer.
+        result = await execute_scenario(
+            scenario,
+            n_steps=n_steps,
+            seed=seed,
+        )
+        trace.record_step(
+            name="execute_scenario",
+            inputs={"scenario": scenario, "n_steps": n_steps, "seed": seed},
+            outputs={"run_id": result.run_id, "status": result.status},
+            reasoning_summary="Ran scenario through local adapter/scaffold extension path.",
+        )
+        trace.record_artifacts_from_run(result, created_by_step="execute_scenario")
+        trace.finalize(
+            outputs={"run_id": result.run_id, "status": result.status, "scenario": result.scenario},
+            error=result.error,
+        )
+        trace.attach_to_run(result)
+        return result
+    except Exception as exc:
+        trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
+        raise
 
 
 @mcp.tool()
@@ -108,17 +148,31 @@ async def ask(question: str, seed: int | None = 42, ctx: Context | None = None) 
 
     Returns a ResearchReport DTO. In full env this will populate report_path, fits, cost_report.
     """
+    trace = traced(
+        name="scenario_research.mcp.ask",
+        inputs={"question": question, "seed": seed},
+        metadata={"surface": "mcp"},
+    )
     # For wiring completeness we return a shaped report; real call to scaffold.ask would populate.
     # (The scaffold cli.ask does the workforce; we keep surface here without duplicating logic.)
     from datetime import datetime, timezone
+
     rid = f"ask-{abs(hash(question)) % 10**8}"
-    return ResearchReport(
+    report = ResearchReport(
         report_id=rid,
         question=question,
         created_at=datetime.now(timezone.utc).isoformat(),
         seed=seed,
         cost_report=CostReport(run_id=rid),
     )
+    trace.record_step(
+        name="build_research_report_shape",
+        inputs={"question": question, "seed": seed},
+        outputs={"report_id": rid},
+        reasoning_summary="Returned a typed ResearchReport shape from MCP ask surface.",
+    )
+    trace.finalize(outputs={"report_id": rid, "seed": seed})
+    return report
 
 
 @mcp.tool()

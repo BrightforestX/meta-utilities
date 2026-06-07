@@ -442,3 +442,79 @@ def test_cli_aliases_and_short_flags_cover_simplified_commands():
     out_run_defaults = subprocess.check_output(base + ["run", "oteemo_billable"], text=True)
     assert "'status': 'succeeded'" in out_run_defaults
 
+
+def test_p3_observability_trace_ledger_tracks_reasoning_and_artifacts(tmp_path, monkeypatch):
+    import json
+    from scenario_research.observability import traced
+
+    trace_dir = tmp_path / "traces"
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TRACE_DIR", str(trace_dir))
+
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text('{"ok": true}')
+
+    t = traced(
+        name="unit.observability",
+        inputs={"x": 1},
+        metadata={"surface": "test"},
+    )
+    t.record_step(
+        name="example_step",
+        inputs={"foo": "bar"},
+        outputs={"ok": True},
+        reasoning_summary="Validated input then created artifact.",
+    )
+    t.record_artifact(
+        path=str(artifact),
+        kind="json_artifact",
+        created_by_step="example_step",
+    )
+    t.finalize(outputs={"done": True})
+
+    ledger = trace_dir / f"{t.trace_id}.json"
+    assert ledger.exists()
+    doc = json.loads(ledger.read_text())
+    assert doc["trace_id"] == t.trace_id
+    assert doc["steps"][0]["reasoning_summary"] == "Validated input then created artifact."
+    assert doc["artifacts"][0]["path"] == str(artifact)
+    assert doc["artifacts"][0]["exists"] is True
+
+
+def test_cli_run_emits_observability_metadata_and_trace_ledger(tmp_path):
+    import ast
+    import json
+    import os
+    import subprocess
+    import sys
+
+    trace_dir = tmp_path / "traces"
+    env = os.environ.copy()
+    env["LANGSMITH_TRACING"] = "false"
+    env["SCENARIO_RESEARCH_TRACE_DIR"] = str(trace_dir)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "scenario_research.cli",
+        "run",
+        "oteemo_billable",
+        "-a",
+        "4",
+        "-n",
+        "2",
+        "-s",
+        "42",
+    ]
+    out = subprocess.check_output(cmd, text=True, env=env)
+    payload = ast.literal_eval(out.strip())
+    obs = payload.get("config_snapshot", {}).get("observability", {})
+    assert obs.get("trace_id"), "trace_id must be attached to ScenarioRun output"
+    assert isinstance(obs.get("artifacts"), list)
+    assert len(obs["artifacts"]) >= 1
+
+    ledger = trace_dir / f"{obs['trace_id']}.json"
+    assert ledger.exists()
+    ledger_doc = json.loads(ledger.read_text())
+    assert ledger_doc["outputs"]["run_id"] == payload["run_id"]
+

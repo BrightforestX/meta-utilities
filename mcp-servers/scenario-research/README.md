@@ -56,6 +56,26 @@ tool_timeouts = { scenario_research = 3600, run_scenario = 3600 }
 - Client: `SCENARIO_RESEARCH_TIMEOUT_SEC` (default 1800s for heavy sims).
 - Host: `tool_timeouts` entry for the long tools.
 
+## Observability (LangSmith + local lineage ledger)
+
+Scenario run/ask flows emit explicit, replayable reasoning + artifact lineage.
+
+- LangSmith (optional, recommended):
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_PROJECT` (default: `scenario-research`)
+  - `LANGSMITH_TRACING=true` (set `false` to disable remote publish)
+- Local ledger (always written):
+  - `SCENARIO_RESEARCH_TRACE_DIR` (default: `mcp-servers/scenario-research/.context/scenario-research-traces`)
+
+Each trace captures:
+- `trace_id`
+- step-level `reasoning_summary` (explicit reasoning notes, not hidden model CoT)
+- step inputs/outputs
+- artifact lineage (`path`, `kind`, `created_by_step`, existence/size)
+- run outputs + status/error
+
+`ScenarioRun.config_snapshot.observability` includes the active `trace_id` and artifact list so downstream tools (CLI/TUI/MCP consumers) can join on lineage.
+
 ## PostgreSQL
 
 Optional everywhere. SQLite is the portable baseline for dev/CI. Full constraint enforcement is a prod nicety.

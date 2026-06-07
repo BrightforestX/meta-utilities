@@ -15,6 +15,7 @@ import asyncio
 
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
+from .observability import traced
 from .router import resolve_endpoint
 from .scaffold_adapter import execute_scenario
 from .validation import validate_before_run
@@ -58,39 +59,96 @@ def _run_impl(
     seed: int | None,
     ontology: str | None,
 ) -> None:
-    resolved_agents = agents if agents is not None else _get_default_from_scenario(
-        scenario,
-        "n_agents",
-        fallback=50,
-        ontology_ref=ontology,
+    trace = traced(
+        name="scenario_research.cli.run",
+        inputs={
+            "scenario": scenario,
+            "agents": agents,
+            "steps": steps,
+            "seed": seed,
+            "ontology": ontology,
+        },
+        metadata={"surface": "cli"},
     )
-    resolved_steps = steps if steps is not None else _get_default_from_scenario(
-        scenario,
-        "n_steps",
-        fallback=5,
-        ontology_ref=ontology,
-    )
-    validate_before_run(
-        scenario,
-        seed=seed,
-        n_steps=resolved_steps,
-        n_agents=resolved_agents,
-        ontology_ref=ontology,
-    )
-    r = asyncio.run(
-        execute_scenario(scenario, n_steps=resolved_steps, seed=seed)
-    )
-    print(r.model_dump())
+    try:
+        resolved_agents = agents if agents is not None else _get_default_from_scenario(
+            scenario,
+            "n_agents",
+            fallback=50,
+            ontology_ref=ontology,
+        )
+        resolved_steps = steps if steps is not None else _get_default_from_scenario(
+            scenario,
+            "n_steps",
+            fallback=5,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="resolve_defaults",
+            inputs={"scenario": scenario, "ontology": ontology},
+            outputs={"resolved_agents": resolved_agents, "resolved_steps": resolved_steps},
+            reasoning_summary="Resolved omitted CLI flags from governed ontology defaults for reproducible runs.",
+        )
+        validate_before_run(
+            scenario,
+            seed=seed,
+            n_steps=resolved_steps,
+            n_agents=resolved_agents,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="validate_before_run",
+            inputs={
+                "scenario": scenario,
+                "seed": seed,
+                "n_steps": resolved_steps,
+                "n_agents": resolved_agents,
+                "ontology_ref": ontology,
+            },
+            outputs={"valid": True},
+            reasoning_summary="Validated scenario parameters and ontology constraints before any execution.",
+        )
+        r = asyncio.run(
+            execute_scenario(scenario, n_steps=resolved_steps, seed=seed)
+        )
+        trace.record_step(
+            name="execute_scenario",
+            inputs={"scenario": scenario, "n_steps": resolved_steps, "seed": seed},
+            outputs={"run_id": r.run_id, "status": r.status},
+            reasoning_summary="Executed scenario after passing validation gates.",
+        )
+        trace.record_artifacts_from_run(r, created_by_step="execute_scenario")
+        trace.finalize(
+            outputs={"run_id": r.run_id, "status": r.status, "scenario": r.scenario},
+            error=r.error,
+        )
+        trace.attach_to_run(r)
+        print(r.model_dump())
+    except Exception as exc:
+        trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def _ask_impl(question: str, seed: int | None = 42) -> None:
     """P4 flow: ask delegates to scaffold workforce when importable, else surfaces ResearchReport shape."""
+    trace = traced(
+        name="scenario_research.cli.ask",
+        inputs={"question": question, "seed": seed},
+        metadata={"surface": "cli"},
+    )
     try:
         from src.auto_research.workforce import build_workforce  # type: ignore
         from camel.tasks import Task  # type: ignore
         wf = build_workforce()
         task = Task(content=question, id="user_question")
         res = wf.process_task(task)
+        trace.record_step(
+            name="workforce_process_task",
+            inputs={"question": question},
+            outputs={"result_type": type(res.result).__name__},
+            reasoning_summary="Used scaffold workforce path for deep ask flow.",
+        )
+        trace.finalize(outputs={"path": "workforce", "seed": seed})
         print(res.result)
     except Exception:
         from .models import ResearchReport, CostReport
@@ -103,6 +161,13 @@ def _ask_impl(question: str, seed: int | None = 42) -> None:
             seed=seed,
             cost_report=CostReport(run_id=rid),
         )
+        trace.record_step(
+            name="fallback_research_report_shape",
+            inputs={"question": question, "seed": seed},
+            outputs={"report_id": rid},
+            reasoning_summary="Fallback path returned typed ResearchReport when workforce runtime was unavailable.",
+        )
+        trace.finalize(outputs={"path": "fallback", "report_id": rid, "seed": seed})
         print(rpt.model_dump())
 
 
