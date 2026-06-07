@@ -80,6 +80,37 @@ def test_router_frontier_for_planner_roles():
     assert get_model_for_role("planner").startswith("frontier:")
 
 
+def test_router_supports_ollama_lmstudio_and_turnover_local_providers(monkeypatch):
+    from scenario_research.router import get_local_inference_config
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "ollama")
+    monkeypatch.setenv("SCENARIO_RESEARCH_OLLAMA_MODEL", "llama3.1:8b")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "ollama"
+    assert get_model_for_role("oasis_agent") == "local:ollama:llama3.1:8b"
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "lmstudio")
+    monkeypatch.setenv("SCENARIO_RESEARCH_LMSTUDIO_MODEL", "qwen2.5-7b-instruct")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "lmstudio"
+    assert get_model_for_role("oasis_agent") == "local:lmstudio:qwen2.5-7b-instruct"
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "turnover")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TURNOVER_MODEL", "turnover-local-14b")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "turnover"
+    assert get_model_for_role("oasis_agent") == "local:turnover:turnover-local-14b"
+
+
+def test_router_cost_saver_mode_forces_frontier_roles_to_local(monkeypatch):
+    monkeypatch.setenv("SCENARIO_RESEARCH_COST_SAVER_MODE", "true")
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "ollama")
+    monkeypatch.setenv("SCENARIO_RESEARCH_OLLAMA_MODEL", "llama3.1:8b")
+
+    assert resolve_endpoint("planner") == "local"
+    assert get_model_for_role("planner") == "local:ollama:llama3.1:8b"
+
+
 def test_dto_roundtrip_json():
     run = ScenarioRun(run_id="r2", scenario="marketing_ab", n_agents=100, n_steps=20)
     js = run.model_dump_json()

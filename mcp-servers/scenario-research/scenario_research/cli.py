@@ -16,7 +16,7 @@ import asyncio
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
 from .observability import traced
-from .router import resolve_endpoint
+from .router import resolve_endpoint, get_local_inference_config
 from .scaffold_adapter import execute_scenario
 from .validation import validate_before_run
 
@@ -30,7 +30,14 @@ def _version_impl() -> None:
 
 def _health_impl() -> None:
     """Local health check (no MCP host required)."""
-    print({"ok": True, "version": __version__, "router_smoke": resolve_endpoint("oasis_agent")})
+    print(
+        {
+            "ok": True,
+            "version": __version__,
+            "router_smoke": resolve_endpoint("oasis_agent"),
+            "local_inference": get_local_inference_config(),
+        }
+    )
 
 
 def _coerce_int(v: Any, fallback: int) -> int:

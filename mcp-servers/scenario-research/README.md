@@ -56,6 +56,34 @@ tool_timeouts = { scenario_research = 3600, run_scenario = 3600 }
 - Client: `SCENARIO_RESEARCH_TIMEOUT_SEC` (default 1800s for heavy sims).
 - Host: `tool_timeouts` entry for the long tools.
 
+## Local inference backends (cost reduction)
+
+Router supports local backends for low-cost execution:
+
+- `mlx` (default)
+- `ollama`
+- `lmstudio`
+- `turnover` (local gateway/provider slot)
+
+Configure with env vars:
+
+- `SCENARIO_RESEARCH_LOCAL_PROVIDER=mlx|ollama|lmstudio|turnover`
+- Provider model envs:
+  - `SCENARIO_RESEARCH_MLX_MODEL` (default `mlx-qwen`)
+  - `SCENARIO_RESEARCH_OLLAMA_MODEL` (default `qwen2.5:14b-instruct`)
+  - `SCENARIO_RESEARCH_LMSTUDIO_MODEL` (default `local-model`)
+  - `SCENARIO_RESEARCH_TURNOVER_MODEL` (default `turnover-local`)
+- Optional provider base URLs:
+  - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+  - `LMSTUDIO_BASE_URL` (default `http://localhost:1234/v1`)
+  - `TURNOVER_BASE_URL` (default `http://localhost:8080`)
+
+If you want maximum cost savings for planning/writer roles too, enable:
+
+- `SCENARIO_RESEARCH_COST_SAVER_MODE=true`
+
+That forces frontier roles to local inference for the run.
+
 ## Observability (LangSmith + local lineage ledger)
 
 Scenario run/ask flows emit explicit, replayable reasoning + artifact lineage.

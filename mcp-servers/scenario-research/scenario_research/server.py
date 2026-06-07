@@ -23,7 +23,7 @@ from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
 from .observability import traced
-from .router import resolve_endpoint, get_model_for_role
+from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
@@ -64,6 +64,7 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
             "oasis_agent": resolve_endpoint("oasis_agent"),
             "planner": resolve_endpoint("planner"),
             "model_oasis": get_model_for_role("oasis_agent"),
+            "local_inference": get_local_inference_config(),
         },
         "contracts": ["ScenarioRun", "ModelFitResult", "CostReport", "ResearchReport"],
     }
