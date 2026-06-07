@@ -236,6 +236,33 @@ def test_p2_agent_yaml_has_tools_policies_and_pops():
     assert "standard_36" in load_population_templates().get("templates", {})
 
 
+def test_p2_scenario_yaml_load_and_compile():
+    from scenario_research.agent_compiler import load_scenarios, compile_scenario_spec
+    scenarios_doc = load_scenarios()
+    assert scenarios_doc.get("schema_version", "").startswith("odrs-scenarios/")
+    assert "scenarios" in scenarios_doc
+
+    spec = compile_scenario_spec("oteemo_billable")
+    assert spec["name"] == "oteemo_billable"
+    assert spec["execution_risk_default"] in ("low", "medium", "high")
+    assert "n_steps" in spec.get("parameters", {})
+
+
+def test_p2_deterministic_scenario_compiler_output():
+    from scenario_research.agent_compiler import canonical_scenario_config
+    c1 = canonical_scenario_config("info_spread")
+    c2 = canonical_scenario_config("info_spread")
+    assert c1 == c2
+    assert '"name":"info_spread"' in c1
+
+
+def test_p3_validate_before_run_rejects_out_of_bounds_scenario_param():
+    from scenario_research.validation import validate_before_run
+    with pytest.raises(ValueError) as e:
+        validate_before_run("oteemo_billable", n_steps=999, n_agents=4, seed=42)
+    assert "SCENARIO_PARAM_MAX" in str(e.value)
+
+
 def test_oteemo_governed_leadership_roles_compile_and_distinct():
     """Oteemo billable: the three heads + Clifford are distinct governed decision agents (not population)."""
     from scenario_research.agent_compiler import compile_agent_for_role, load_roles

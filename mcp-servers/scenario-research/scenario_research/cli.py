@@ -17,6 +17,7 @@ from . import __version__
 from .models import ScenarioRun
 from .router import resolve_endpoint
 from .scaffold_adapter import execute_scenario, get_scaffold_root
+from .validation import validate_before_run
 
 app = typer.Typer(help="ODRS scenario-research (extends camel-oasis-scaffold)")
 
@@ -41,6 +42,7 @@ def run(
     seed: int | None = 42,
 ) -> None:
     """Run governed scenario. oteemo_billable is fully local (extends adapter without camel-oasis)."""
+    validate_before_run(scenario, seed=seed, n_steps=steps, n_agents=agents)
     r = asyncio.run(
         execute_scenario(scenario, n_steps=steps, seed=seed)
     )

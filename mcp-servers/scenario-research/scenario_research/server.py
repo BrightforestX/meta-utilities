@@ -83,7 +83,7 @@ async def run_scenario(
     Returns a populated ScenarioRun (status, db_path, error if any).
     """
     # P3: block on invalid governed yaml/config before any scaffold work
-    validate_before_run(scenario, seed=seed)
+    validate_before_run(scenario, seed=seed, n_steps=n_steps, n_agents=n_agents)
 
     # Note: n_agents is advisory here; the scaffold profiles determine population size.
     # Real enforcement / population_templates come in P2 ontology layer.

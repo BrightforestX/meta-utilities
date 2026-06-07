@@ -51,6 +51,10 @@ def load_population_templates(ontology_base: Path | None = None) -> dict[str, An
     return _load_yaml("population_templates.yaml", ontology_base)
 
 
+def load_scenarios(ontology_base: Path | None = None) -> dict[str, Any]:
+    return _load_yaml("scenarios.yaml", ontology_base)
+
+
 def compile_agent_for_role(role_name: str, ontology_base: Path | None = None) -> dict[str, Any]:
     """Return a canonical runtime spec for the given role name.
 
@@ -97,8 +101,45 @@ def compile_agent_for_role(role_name: str, ontology_base: Path | None = None) ->
     return spec
 
 
+def compile_scenario_spec(scenario_name: str, ontology_base: Path | None = None) -> dict[str, Any]:
+    """Return a canonical runtime spec for a governed scenario definition.
+
+    Shape (stable across runs):
+    {
+      "name": "...",
+      "type": "...",
+      "description": "...",
+      "execution_risk_default": "low|medium|high",
+      "parameters": {"n_steps": {...}, ...},
+      "source": "odrs-scenarios/1@<version>"
+    }
+    """
+    doc = load_scenarios(ontology_base)
+    scenarios = doc.get("scenarios", {}) or {}
+    raw = scenarios.get(scenario_name)
+    if raw is None:
+        raise ValueError(f"unknown governed scenario {scenario_name!r}")
+
+    params = raw.get("parameters", {}) or {}
+    spec: dict[str, Any] = {
+        "name": scenario_name,
+        "type": raw.get("type", "unspecified"),
+        "description": raw.get("description", ""),
+        "execution_risk_default": raw.get("execution_risk_default", "medium"),
+        "parameters": params,
+        "source": f"odrs-scenarios/1@{doc.get('version', '0')}",
+    }
+    return spec
+
+
 def canonical_runtime_config(role_name: str, ontology_base: Path | None = None) -> str:
     """Deterministic, canonical JSON string for the compiled role (for snapshot/repro tests)."""
     spec = compile_agent_for_role(role_name, ontology_base)
     # sort keys, no whitespace variance
+    return json.dumps(spec, sort_keys=True, separators=(",", ":"))
+
+
+def canonical_scenario_config(scenario_name: str, ontology_base: Path | None = None) -> str:
+    """Deterministic, canonical JSON string for a scenario definition."""
+    spec = compile_scenario_spec(scenario_name, ontology_base)
     return json.dumps(spec, sort_keys=True, separators=(",", ":"))

@@ -6,6 +6,9 @@ export type LeaderRec = {
   role: string;
   rec: string;
   metric?: string;
+  reasoning?: string;
+  executionRisk?: "low" | "medium" | "high";
+  executionPath?: string;
 };
 
 export function LeaderCard({ rec }: { rec: LeaderRec }) {
@@ -14,6 +17,9 @@ export function LeaderCard({ rec }: { rec: LeaderRec }) {
       <Text bold color="cyan">{rec.name} — {rec.role}</Text>
       <Text>{rec.rec}</Text>
       {rec.metric ? <Text dimColor>metric: {rec.metric}</Text> : null}
+      {rec.executionRisk ? <Text dimColor>execution risk: {rec.executionRisk}</Text> : null}
+      {rec.reasoning ? <Text dimColor>why now: {rec.reasoning}</Text> : null}
+      {rec.executionPath ? <Text dimColor>execution path: {rec.executionPath}</Text> : null}
     </Box>
   );
 }

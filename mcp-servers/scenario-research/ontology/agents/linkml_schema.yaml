@@ -62,3 +62,42 @@ classes:
       n:
         range: integer
         required: false
+
+  ScenarioParameterSpec:
+    attributes:
+      name:
+        identifier: true
+      type:
+        range: string
+      description:
+        range: string
+      required:
+        range: boolean
+        required: false
+      default_value:
+        range: string
+        required: false
+      minimum:
+        range: string
+        required: false
+      maximum:
+        range: string
+        required: false
+      enum_values:
+        range: string
+        multivalued: true
+        required: false
+
+  ScenarioSpec:
+    attributes:
+      name:
+        identifier: true
+      type:
+        range: string
+      description:
+        range: string
+      execution_risk_default:
+        range: string
+      parameters:
+        range: ScenarioParameterSpec
+        multivalued: true

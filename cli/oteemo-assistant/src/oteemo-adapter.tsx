@@ -127,6 +127,65 @@ function extractSparklinesFromReport(report: string): { util?: number[]; maturit
   };
 }
 
+type ExecutionRisk = "low" | "medium" | "high";
+
+function riskScore(risk: ExecutionRisk | undefined): number {
+  if (risk === "low") return 0;
+  if (risk === "medium") return 1;
+  return 2;
+}
+
+function enrichRecommendation(rec: LeaderRec, useLive: boolean): LeaderRec {
+  const roleBlob = `${rec.name} ${rec.role}`.toLowerCase();
+  if (roleBlob.includes("arka")) {
+    return {
+      ...rec,
+      executionRisk: "low",
+      reasoning: "Arcade toolkit-driven changes are reversible and have narrow blast radius.",
+      executionPath: "arcade_list_toolkits -> arcade_call_tool",
+    };
+  }
+  if (roleBlob.includes("rod") || roleBlob.includes("roderick")) {
+    return {
+      ...rec,
+      executionRisk: "low",
+      reasoning: useLive
+        ? "Composio-backed pull path is already grounded by live context signals."
+        : "Composio path can start with read-only discovery before any write action.",
+      executionPath: "composio_list_tools(slug:salesforce|gmail|slack) -> composio_call_tool",
+    };
+  }
+  if (roleBlob.includes("raja")) {
+    return {
+      ...rec,
+      executionRisk: "medium",
+      reasoning: "Finance policy adjustments impact wider budget controls and should be staged.",
+      executionPath: "composio_list_apps -> composio_call_tool (pipeline/forecast updates)",
+    };
+  }
+  if (roleBlob.includes("clifford")) {
+    return {
+      ...rec,
+      executionRisk: "medium",
+      reasoning: "Contractor leverage changes are effective but usually require broader coordination.",
+      executionPath: "scenario policy replay (local) -> optional arcade/composio follow-up",
+    };
+  }
+  return {
+    ...rec,
+    executionRisk: "medium",
+    reasoning: "Defaulted to medium risk due to missing role-specific execution profile.",
+  };
+}
+
+function rankLowestRiskFirst(recs: LeaderRec[]): LeaderRec[] {
+  return [...recs].sort((a, b) => {
+    const riskCmp = riskScore(a.executionRisk) - riskScore(b.executionRisk);
+    if (riskCmp !== 0) return riskCmp;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function OteemoChat() {
   const [manager, setManager] = useState<McpManager | null>(null);
   const [messages, setMessages] = useState<Msg[]>([
@@ -189,18 +248,40 @@ export function OteemoChat() {
       }
       if (recs.length === 0) {
         recs = [
-          { name: "Raja (CEO/FinOps)", role: "strategy + FinOps", rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.", metric: "maturity >=0.35" },
-          { name: "Arka (VP Tech)", role: "platform leverage", rec: "Focus GraphRAG/A2A leverage; efficiency_mult compounds.", metric: "efficiency" },
-          { name: "Rod (Fed Delivery)", role: "billable owner", rec: "client_target_util + bid_aggressiveness per horizon windows." + (useLive && lastLiveContext ? "  [LIVE: +bid_aggr suggested from recent client thread volume]" : ""), metric: "util / bench" },
-          { name: "Clifford (Contractor)", role: "Axiom FinOps fixed", rec: "Fixed internal_platform + PDR telemetry for cost attribution.", metric: "+maturity boost" },
+          {
+            name: "Raja (CEO/FinOps)",
+            role: "strategy + FinOps",
+            rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.",
+            metric: "maturity >=0.35",
+          },
+          {
+            name: "Arka (VP Tech)",
+            role: "platform leverage",
+            rec: "Focus GraphRAG/A2A leverage; efficiency_mult compounds.",
+            metric: "efficiency",
+          },
+          {
+            name: "Rod (Fed Delivery)",
+            role: "billable owner",
+            rec: "client_target_util + bid_aggressiveness per horizon windows." + (useLive && lastLiveContext ? "  [LIVE: +bid_aggr suggested from recent client thread volume]" : ""),
+            metric: "util / bench",
+          },
+          {
+            name: "Clifford (Contractor)",
+            role: "Axiom FinOps fixed",
+            rec: "Fixed internal_platform + PDR telemetry for cost attribution.",
+            metric: "+maturity boost",
+          },
         ];
       }
+      const ranked = rankLowestRiskFirst(recs.map((r) => enrichRecommendation(r, useLive)));
+      const topTwo = ranked.slice(0, 2);
       const note = latest
-        ? `Report: ${latest.path}. Follow up: 're-run 8 --optimize', 'show report', 'validate <yaml>', 'pull gmail PEO', 'enrich with live'.`
-        : "Full report + json written under oteemo/reports/. Follow up with 're-run ...' or 'show report'.";
+        ? `Report: ${latest.path}. Showing top 2 lowest execution-risk candidates. Follow up: 're-run 8 --optimize', 'show report', 'validate <yaml>', 'pull gmail PEO', 'enrich with live'.`
+        : "Full report + json written under oteemo/reports/. Showing top 2 lowest execution-risk candidates.";
 
       const liveBusinessContext = useLive && lastLiveContext ? lastLiveContext : undefined;
-      return { summary, recs, note, reportMd, sparkUtil, sparkMat, raw: run, liveBusinessContext };
+      return { summary, recs: topTwo, note, reportMd, sparkUtil, sparkMat, raw: run, liveBusinessContext };
     } finally {
       setBusy(false);
     }
@@ -274,7 +355,7 @@ export function OteemoChat() {
     } else if (intent.kind === "health") {
       reply = manager ? "scenario + px (if present) connected. Use 'run oteemo'." : "Manager initializing...";
     } else if (intent.kind === "help") {
-      reply = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help. px pulls surface as LiveBusinessContext; can seed oteemo recs + appear in rendered output (pure sim always works).";
+      reply = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help. Defaults to top 2 lowest-risk candidates with reasoning + composio/arcade execution path hints.";
     } else if (intent.kind === "validate_yaml") {
       if (manager) {
         try {
