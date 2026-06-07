@@ -576,33 +576,23 @@ def test_p3_observability_trace_ledger_tracks_reasoning_and_artifacts(tmp_path, 
     assert doc["artifacts"][0]["exists"] is True
 
 
-def test_cli_run_emits_observability_metadata_and_trace_ledger(tmp_path):
-    import ast
+def test_cli_run_emits_observability_metadata_and_trace_ledger(tmp_path, monkeypatch):
     import json
-    import os
-    import subprocess
-    import sys
+    import scenario_research.cli as cli_mod
 
-    trace_dir = tmp_path / "traces"
-    env = os.environ.copy()
-    env["LANGSMITH_TRACING"] = "false"
-    env["SCENARIO_RESEARCH_TRACE_DIR"] = str(trace_dir)
+    trace_dir = tmp_path / "t"
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TRACE_DIR", str(trace_dir))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "scenario_research.cli",
-        "run",
-        "oteemo_billable",
-        "-a",
-        "4",
-        "-n",
-        "2",
-        "-s",
-        "42",
-    ]
-    out = subprocess.check_output(cmd, text=True, env=env)
-    payload = ast.literal_eval(out.strip())
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._run_impl("oteemo_billable", agents=4, steps=2, seed=42, ontology=None)
+    payload = captured["payload"]
     obs = payload.get("config_snapshot", {}).get("observability", {})
     assert obs.get("trace_id"), "trace_id must be attached to ScenarioRun output"
     assert isinstance(obs.get("artifacts"), list)
@@ -612,4 +602,101 @@ def test_cli_run_emits_observability_metadata_and_trace_ledger(tmp_path):
     assert ledger.exists()
     ledger_doc = json.loads(ledger.read_text())
     assert ledger_doc["outputs"]["run_id"] == payload["run_id"]
+
+
+def test_linkml_to_surreal_compiler_emits_expected_ddl():
+    from scenario_research.linkml_surreal import compile_linkml_to_surrealql
+    from pathlib import Path
+
+    linkml = Path(__file__).resolve().parents[1] / "ontology" / "memory" / "linkml_data_model.yaml"
+    ddl = compile_linkml_to_surrealql(linkml, namespace="odrs", database="memory")
+    assert "DEFINE NAMESPACE IF NOT EXISTS odrs;" in ddl
+    assert "DEFINE DATABASE IF NOT EXISTS memory;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS MemoryItem SCHEMAFULL;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace SCHEMAFULL;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS Attribution SCHEMAFULL;" in ddl
+    assert "DEFINE INDEX IF NOT EXISTS MemoryItem_id_uniq" in ddl
+
+
+def test_scenario_surreal_writer_fallback_persists_payload(tmp_path):
+    import json
+    from pathlib import Path
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "pdr_attributions": [
+                        {"period": 1, "delta_util": 0.01, "invest_cost": 4.0, "attribution_level": "policy"}
+                    ]
+                }
+            }
+        )
+    )
+
+    run = ScenarioRun(
+        run_id="r-surreal-fallback",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"raja": {"axiom_invest_frac": 0.22}}},
+    )
+    writer = ScenarioSurrealWriter(
+        surreal=None,
+        fallback_dir=tmp_path / "surreal-fallback",
+    )
+    out = writer.store_scenario_run(run, trace_id="t-1", ontology_ref="odrs_agents")
+    assert out["backend"] == "fallback"
+    fp = Path(out["fallback_path"])
+    assert fp.exists()
+    payload = json.loads(fp.read_text())
+    assert payload["records"]["scenario_trace"]["run_id"] == run.run_id
+    assert len(payload["records"]["attributions"]) == 1
+
+
+def test_scenario_surreal_writer_uses_surreal_when_healthy(tmp_path):
+    import json
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(json.dumps({"trace": {"pdr_attributions": []}}))
+
+    run = ScenarioRun(
+        run_id="r-surreal-live",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"rod": {"client_target_util": 0.68}}},
+    )
+
+    class FakeSurreal:
+        def __init__(self):
+            self.calls = []
+
+        def is_healthy(self):
+            return True
+
+        def execute_sql(self, sql: str):
+            self.calls.append(sql)
+            return {"ok": True}
+
+    fake = FakeSurreal()
+    writer = ScenarioSurrealWriter(
+        surreal=fake,  # type: ignore[arg-type]
+        fallback_dir=tmp_path / "surreal-fallback",
+    )
+    out = writer.store_scenario_run(run, trace_id="t-2", ontology_ref="agents")
+    assert out["backend"] == "surreal"
+    assert out["records_written"] >= 1
+    assert len(fake.calls) >= 2  # schema + write
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace" in fake.calls[0]
+    assert "CREATE ScenarioTrace CONTENT" in fake.calls[1]
 

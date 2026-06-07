@@ -94,6 +94,26 @@ scenario-research prov --active-only --timeout-sec 0.5
 
 Note: `mlx` is typically an in-process local runtime, so probe output will mark it as a non-HTTP endpoint rather than pinging a network health URL.
 
+## LinkML -> Surreal + run artifact writes
+
+Step 1 (implemented): LinkML memory schema compilation to SurrealQL:
+- `scenario_research/linkml_surreal.py::compile_linkml_to_surrealql`
+- source schema: `ontology/memory/linkml_data_model.yaml`
+- emits namespace/db/table/field/index DDL for `MemoryItem`, `ScenarioTrace`, `Attribution`, `LiveBusinessContext`
+
+Step 2 (implemented): write-path adapter for scenario artifacts:
+- `ScenarioSurrealWriter` + `persist_run_artifacts`
+- CLI and MCP `run` paths call this after scenario execution
+- if `SURREAL_URL` is healthy: applies schema and writes records
+- fallback: writes local payload JSON to `.context/scenario-surreal-writes/` (or `SCENARIO_SURREAL_FALLBACK_DIR`)
+
+Surreal envs:
+- `SURREAL_URL`
+- `SURREAL_NS` (default `odrs`)
+- `SURREAL_DB` (default `memory`)
+- optional auth: `SURREAL_USER`, `SURREAL_PASS`
+- optional timeout: `SURREAL_TIMEOUT_SEC`
+
 ## Observability (LangSmith + local lineage ledger)
 
 Scenario run/ask flows emit explicit, replayable reasoning + artifact lineage.

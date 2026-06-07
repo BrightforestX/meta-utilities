@@ -15,6 +15,7 @@ import asyncio
 
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
+from .linkml_surreal import persist_run_artifacts
 from .observability import traced
 from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
 from .scaffold_adapter import execute_scenario
@@ -124,6 +125,28 @@ def _run_impl(
             outputs={"run_id": r.run_id, "status": r.status},
             reasoning_summary="Executed scenario after passing validation gates.",
         )
+        surreal_write = persist_run_artifacts(
+            r,
+            trace_id=trace.trace_id,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="persist_run_artifacts",
+            inputs={"run_id": r.run_id, "trace_id": trace.trace_id, "ontology_ref": ontology},
+            outputs={
+                "backend": surreal_write.get("backend"),
+                "records_written": surreal_write.get("records_written"),
+            },
+            reasoning_summary="Persisted structured scenario artifacts to Surreal when healthy, else local fallback.",
+            metadata={"surreal_write": surreal_write},
+        )
+        if surreal_write.get("fallback_path"):
+            trace.record_artifact(
+                path=str(surreal_write["fallback_path"]),
+                kind="surreal_fallback_payload",
+                created_by_step="persist_run_artifacts",
+                metadata={"run_id": r.run_id},
+            )
         trace.record_artifacts_from_run(r, created_by_step="execute_scenario")
         trace.finalize(
             outputs={"run_id": r.run_id, "status": r.status, "scenario": r.scenario},

@@ -22,6 +22,7 @@ from typing import Any
 from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
+from .linkml_surreal import persist_run_artifacts
 from .observability import traced
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
 from .scaffold_adapter import execute_scenario, get_scaffold_root
@@ -131,6 +132,28 @@ async def run_scenario(
             outputs={"run_id": result.run_id, "status": result.status},
             reasoning_summary="Ran scenario through local adapter/scaffold extension path.",
         )
+        surreal_write = persist_run_artifacts(
+            result,
+            trace_id=trace.trace_id,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="persist_run_artifacts",
+            inputs={"run_id": result.run_id, "trace_id": trace.trace_id, "ontology_ref": ontology},
+            outputs={
+                "backend": surreal_write.get("backend"),
+                "records_written": surreal_write.get("records_written"),
+            },
+            reasoning_summary="Persisted structured scenario artifacts to Surreal when healthy, else local fallback.",
+            metadata={"surreal_write": surreal_write},
+        )
+        if surreal_write.get("fallback_path"):
+            trace.record_artifact(
+                path=str(surreal_write["fallback_path"]),
+                kind="surreal_fallback_payload",
+                created_by_step="persist_run_artifacts",
+                metadata={"run_id": result.run_id},
+            )
         trace.record_artifacts_from_run(result, created_by_step="execute_scenario")
         trace.finalize(
             outputs={"run_id": result.run_id, "status": result.status, "scenario": result.scenario},
