@@ -16,7 +16,7 @@ import asyncio
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
 from .observability import traced
-from .router import resolve_endpoint, get_local_inference_config
+from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
 from .scaffold_adapter import execute_scenario
 from .validation import validate_before_run
 
@@ -218,6 +218,41 @@ def ontologies() -> None:
 def ontologies_short() -> None:
     """Short alias for ontologies."""
     ontologies()
+
+
+@app.command()
+def providers(
+    active_only: bool = typer.Option(
+        False,
+        "--active-only",
+        help="Probe only the currently active provider.",
+    ),
+    timeout_sec: float = typer.Option(
+        1.5,
+        "--timeout-sec",
+        help="Per-provider HTTP probe timeout in seconds.",
+    ),
+) -> None:
+    """Probe local provider reachability (Ollama, LM Studio, turnover)."""
+    local = get_local_inference_config()
+    rows = probe_local_providers(active_only=active_only, timeout_sec=timeout_sec)
+    print(
+        {
+            "active_provider": local["provider"],
+            "active_model": local["model"],
+            "active_base_url": local["base_url"],
+            "providers": rows,
+        }
+    )
+
+
+@app.command("prov")
+def providers_short(
+    active_only: bool = typer.Option(False, "--active-only"),
+    timeout_sec: float = typer.Option(1.5, "--timeout-sec"),
+) -> None:
+    """Short alias for providers."""
+    providers(active_only=active_only, timeout_sec=timeout_sec)
 
 
 @app.command()

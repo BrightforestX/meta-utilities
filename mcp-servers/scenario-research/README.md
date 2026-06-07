@@ -84,6 +84,16 @@ If you want maximum cost savings for planning/writer roles too, enable:
 
 That forces frontier roles to local inference for the run.
 
+Check provider reachability before runs:
+
+```bash
+scenario-research providers
+scenario-research providers --active-only
+scenario-research prov --active-only --timeout-sec 0.5
+```
+
+Note: `mlx` is typically an in-process local runtime, so probe output will mark it as a non-HTTP endpoint rather than pinging a network health URL.
+
 ## Observability (LangSmith + local lineage ledger)
 
 Scenario run/ask flows emit explicit, replayable reasoning + artifact lineage.

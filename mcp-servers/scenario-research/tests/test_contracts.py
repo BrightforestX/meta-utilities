@@ -111,6 +111,66 @@ def test_router_cost_saver_mode_forces_frontier_roles_to_local(monkeypatch):
     assert get_model_for_role("planner") == "local:ollama:llama3.1:8b"
 
 
+def test_probe_local_providers_active_only_uses_selected_provider(monkeypatch):
+    from scenario_research.router import probe_local_providers
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "lmstudio")
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+
+    called: list[str] = []
+
+    def fake_ping(url: str, timeout_sec: float):
+        called.append(url)
+        return (True, 200, None)
+
+    rows = probe_local_providers(active_only=True, timeout_sec=0.1, ping_fn=fake_ping)
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "lmstudio"
+    assert rows[0]["ok"] is True
+    assert called[0].endswith("/v1/models")
+
+
+def test_probe_local_providers_reports_mlx_as_non_http_runtime(monkeypatch):
+    from scenario_research.router import probe_local_providers
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "mlx")
+    rows = probe_local_providers(active_only=True, timeout_sec=0.1)
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "mlx"
+    assert rows[0]["ok"] is False
+    assert "non-http local runtime endpoint" in str(rows[0]["error"])
+
+
+def test_cli_providers_command_reports_reachability():
+    import ast
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["SCENARIO_RESEARCH_LOCAL_PROVIDER"] = "ollama"
+    env["OLLAMA_BASE_URL"] = "http://127.0.0.1:9"
+
+    out = subprocess.check_output(
+        [
+            sys.executable,
+            "-m",
+            "scenario_research.cli",
+            "providers",
+            "--active-only",
+            "--timeout-sec",
+            "0.2",
+        ],
+        text=True,
+        env=env,
+    )
+    payload = ast.literal_eval(out.strip())
+    assert payload["active_provider"] == "ollama"
+    assert len(payload["providers"]) == 1
+    assert payload["providers"][0]["provider"] == "ollama"
+    assert payload["providers"][0]["ok"] is False
+
+
 def test_dto_roundtrip_json():
     run = ScenarioRun(run_id="r2", scenario="marketing_ab", n_agents=100, n_steps=20)
     js = run.model_dump_json()
@@ -461,6 +521,10 @@ def test_cli_aliases_and_short_flags_cover_simplified_commands():
     out_onts = subprocess.check_output(base + ["ontologies"], text=True)
     assert "'folder': 'agents'" in out_onts
     assert "'linkml_name': 'odrs_agents'" in out_onts
+
+    out_prov = subprocess.check_output(base + ["prov", "--active-only", "--timeout-sec", "0.2"], text=True)
+    assert "'active_provider'" in out_prov
+    assert "'providers'" in out_prov
 
     out_run = subprocess.check_output(
         base + ["r", "oteemo_billable", "-a", "4", "-n", "2", "-s", "42", "-o", "odrs_agents"],
