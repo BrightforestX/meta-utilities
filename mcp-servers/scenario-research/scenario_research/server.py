@@ -22,8 +22,10 @@ from typing import Any
 from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
+from .analytics import estimate_cost_report, fit_models_from_trace, load_trace_payload
 from .linkml_surreal import persist_run_artifacts
 from .observability import traced
+from .optimization.replay import replay_policy as replay_policy_robustness
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
@@ -40,6 +42,7 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
+_RUN_CACHE: dict[str, ScenarioRun] = {}
 
 mcp = FastMCP(
     name="scenario-research",
@@ -160,6 +163,7 @@ async def run_scenario(
             error=result.error,
         )
         trace.attach_to_run(result)
+        _RUN_CACHE[result.run_id] = result
         return result
     except Exception as exc:
         trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
@@ -200,18 +204,49 @@ async def ask(question: str, seed: int | None = 42, ctx: Context | None = None) 
 
 
 @mcp.tool()
+async def get_cost_report(run_id: str, ctx: Context | None = None) -> CostReport:
+    """Return deterministic cost telemetry estimate for a known run."""
+    run = _RUN_CACHE.get(run_id)
+    if run is None:
+        return CostReport(run_id=run_id, notes="run_id not found in in-process cache")
+    return estimate_cost_report(run)
+
+
+@mcp.tool()
+async def fit_models(
+    run_id: str | None = None,
+    db_path: str | None = None,
+    models: list[str] | None = None,
+    ctx: Context | None = None,
+) -> list[dict[str, Any]]:
+    """Fit lightweight model summaries over a scenario trace JSON payload."""
+    resolved_path = db_path
+    if run_id and run_id in _RUN_CACHE:
+        resolved_path = _RUN_CACHE[run_id].db_path
+    trace = load_trace_payload(resolved_path)
+    fits = fit_models_from_trace(trace, models=models)
+    return [f.model_dump() for f in fits]
+
+
+@mcp.tool()
+async def replay_policy(
+    policy: dict[str, Any],
+    scenario: str = "oteemo_billable",
+    seed: int = 42,
+    periods: int = 12,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Replay candidate policy vs baseline and return robustness deltas."""
+    return replay_policy_robustness(policy, scenario=scenario, seed=seed, periods=periods)
+
+
+@mcp.tool()
 async def validate_agent_yaml(yaml_text: str, ctx: Context | None = None) -> dict[str, Any]:
     """P3 surface: validate governed agent yaml before simulation (AC12)."""
     try:
         return validate_agent_yaml_text(yaml_text)
     except Exception as exc:  # structured
         return {"valid": False, "error": exc if isinstance(exc, dict) else {"message": str(exc)}}
-
-
-# Future tools (stubs for contract surface):
-# - ask(question) -> ResearchReport
-# - get_cost_report(run_id) -> CostReport
-# - fit_models(db_path, models) -> list[ModelFitResult]
 
 
 def main() -> None:

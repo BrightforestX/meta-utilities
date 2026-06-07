@@ -139,6 +139,14 @@ Each trace captures:
 
 `ScenarioRun.config_snapshot.observability` includes the active `trace_id` and artifact list so downstream tools (CLI/TUI/MCP consumers) can join on lineage.
 
+## MCP analysis tools (implemented)
+
+In addition to `run_scenario` and `ask`, the server now exposes:
+
+- `get_cost_report(run_id)` -> deterministic local/api token estimate from run artifacts
+- `fit_models(run_id|db_path, models)` -> lightweight fit summaries (`sir`, `hawkes`, `bounded_confidence`, `bayesian_ab`)
+- `replay_policy(policy, scenario, seed, periods)` -> baseline-vs-treatment robustness deltas (implemented for `oteemo_billable`)
+
 ## PostgreSQL
 
 Optional everywhere. SQLite is the portable baseline for dev/CI. Full constraint enforcement is a prod nicety.

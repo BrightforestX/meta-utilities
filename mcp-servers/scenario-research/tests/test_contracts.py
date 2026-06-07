@@ -271,7 +271,76 @@ def test_p6_optimizer_contract_and_replay():
     res = optimize_policy(cands, objective="profit")
     assert "chosen" in res and "status" in res
     rep = replay_policy(res.get("chosen") or {})
-    assert "robustness_delta" in rep and rep["status"] in ("stub", "solved")
+    assert "robustness_delta" in rep and rep["status"] == "solved"
+    assert "baseline" in rep and "treatment" in rep
+
+
+def test_replay_policy_is_deterministic_for_same_seed():
+    from scenario_research.optimization.replay import replay_policy
+
+    policy = {"raja": {"finops_tier": "efficient"}, "rod": {"client_target_util": 0.7}}
+    rep1 = replay_policy(policy, scenario="oteemo_billable", seed=7, periods=5)
+    rep2 = replay_policy(policy, scenario="oteemo_billable", seed=7, periods=5)
+    assert rep1["status"] == "solved"
+    assert rep1["robustness_delta"] == rep2["robustness_delta"]
+    assert rep1["uncertainty"] == rep2["uncertainty"]
+
+
+def test_server_cost_report_and_fit_models_tools(tmp_path):
+    import asyncio
+    import json
+    import sys
+    import types
+
+    class _DummyFastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def run(self):
+            return None
+
+    if "fastmcp" not in sys.modules:
+        sys.modules["fastmcp"] = types.SimpleNamespace(FastMCP=_DummyFastMCP, Context=object)
+
+    import scenario_research.server as server_mod
+
+    trace_path = tmp_path / "trace.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "util_trajectory": [0.6, 0.63, 0.65, 0.67],
+                    "pdr_attributions": [{"period": 1, "delta_util": 0.03, "invest_cost": 4.0}],
+                }
+            }
+        )
+    )
+    run = ScenarioRun(
+        run_id="run-tools-1",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=4,
+        seed=42,
+        db_path=str(trace_path),
+        status="succeeded",
+        config_snapshot={},
+    )
+    server_mod._RUN_CACHE[run.run_id] = run
+
+    cost = asyncio.run(server_mod.get_cost_report(run_id=run.run_id))
+    assert cost.run_id == run.run_id
+    assert cost.local_tokens > 0
+
+    fits = asyncio.run(server_mod.fit_models(run_id=run.run_id, models=["sir", "bayesian_ab"]))
+    assert isinstance(fits, list)
+    assert len(fits) == 2
+    assert fits[0]["model"] == "sir"
+    assert fits[1]["model"] == "bayesian_ab"
 
 
 
