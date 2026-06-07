@@ -349,7 +349,9 @@ def test_server_cost_report_and_fit_models_tools(tmp_path):
             {
                 "records": {
                     "scenario_trace": {"run_id": run.run_id, "period": 4},
-                    "attributions": [],
+                    "attributions": [
+                        {"run_id": run.run_id, "period": 1, "level": "policy", "cost": 4.0, "delta": 0.02}
+                    ],
                     "live_business_context": {"signals": {"run_id": run.run_id}},
                 }
             }
@@ -359,6 +361,16 @@ def test_server_cost_report_and_fit_models_tools(tmp_path):
     __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = str(fb_dir)
     try:
         artifacts = asyncio.run(server_mod.get_run_artifacts(run_id=run.run_id, prefer_surreal=False))
+        attr = asyncio.run(
+            server_mod.query_attributions(
+                run_id=run.run_id,
+                period_min=1,
+                period_max=1,
+                level="policy",
+                aggregate="sum_cost_by_level",
+                prefer_surreal=False,
+            )
+        )
     finally:
         if old_env is None:
             __import__("os").environ.pop("SCENARIO_SURREAL_FALLBACK_DIR", None)
@@ -366,6 +378,41 @@ def test_server_cost_report_and_fit_models_tools(tmp_path):
             __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = old_env
     assert artifacts["found"] is True
     assert artifacts["scenario_trace"]["run_id"] == run.run_id
+    assert attr["count"] == 1
+    assert attr["aggregate"]["kind"] == "sum_cost_by_level"
+
+
+def test_server_ask_returns_artifact_backed_report(tmp_path, monkeypatch):
+    import asyncio
+    import sys
+    import types
+    from pathlib import Path
+
+    class _DummyFastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def run(self):
+            return None
+
+    if "fastmcp" not in sys.modules:
+        sys.modules["fastmcp"] = types.SimpleNamespace(FastMCP=_DummyFastMCP, Context=object)
+
+    import scenario_research.server as server_mod
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    report = asyncio.run(server_mod.ask(question="Improve billable utilization", seed=6))
+    assert report.report_path
+    assert Path(report.report_path).exists()
+    assert report.scenario_runs
+    assert report.fits
 
 
 
@@ -630,6 +677,15 @@ def test_cli_aliases_and_short_flags_cover_simplified_commands():
     # Defaults are now ontology-driven; this should not fail on n_agents validation.
     out_run_defaults = subprocess.check_output(base + ["run", "oteemo_billable"], text=True)
     assert "'status': 'succeeded'" in out_run_defaults
+
+    out_arts = subprocess.check_output(base + ["arts", "oteemo_billable-42", "--prefer-fallback"], text=True)
+    assert "'run_id': 'oteemo_billable-42'" in out_arts
+
+    out_attrs = subprocess.check_output(
+        base + ["attrs", "oteemo_billable-42", "--prefer-fallback", "--aggregate", "sum_cost_by_level"],
+        text=True,
+    )
+    assert "'aggregate'" in out_attrs
 
 
 def test_p3_observability_trace_ledger_tracks_reasoning_and_artifacts(tmp_path, monkeypatch):
@@ -922,6 +978,108 @@ def test_cli_artifacts_impl_fetches_payload(tmp_path, monkeypatch):
     cli_mod._artifacts_impl(run_id, prefer_surreal=False)
     assert captured["payload"]["found"] is True
     assert captured["payload"]["scenario_trace"]["run_id"] == run_id
+
+
+def test_query_run_attributions_filters_and_aggregate(tmp_path, monkeypatch):
+    import json
+    from scenario_research.linkml_surreal import query_run_attributions
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-attribution-query"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id, "period": 4},
+                    "attributions": [
+                        {"run_id": run_id, "period": 1, "level": "policy", "cost": 3.0, "delta": 0.01},
+                        {"run_id": run_id, "period": 2, "level": "policy", "cost": 5.0, "delta": -0.02},
+                        {"run_id": run_id, "period": 3, "level": "ops", "cost": 2.0, "delta": 0.03},
+                    ],
+                    "live_business_context": {},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    out = query_run_attributions(
+        run_id,
+        period_min=2,
+        period_max=3,
+        level="policy",
+        aggregate="sum_cost_by_level",
+        prefer_surreal=False,
+    )
+    assert out["found"] is True
+    assert out["count"] == 1
+    assert out["rows"][0]["period"] == 2
+    assert out["aggregate"]["kind"] == "sum_cost_by_level"
+    assert out["aggregate"]["buckets"]["policy"]["sum_cost"] == 5.0
+
+
+def test_cli_attributions_impl_fetches_and_aggregates(tmp_path, monkeypatch):
+    import json
+    import scenario_research.cli as cli_mod
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-cli-attributions"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id},
+                    "attributions": [
+                        {"run_id": run_id, "period": 1, "level": "policy", "cost": 4.0, "delta": 0.05}
+                    ],
+                    "live_business_context": {},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._attributions_impl(
+        run_id,
+        period_min=1,
+        period_max=1,
+        level="policy",
+        aggregate="sum_delta_by_period",
+        prefer_surreal=False,
+    )
+    assert captured["payload"]["count"] == 1
+    assert captured["payload"]["aggregate"]["kind"] == "sum_delta_by_period"
+
+
+def test_build_research_report_pipeline_produces_report_artifact(tmp_path, monkeypatch):
+    import asyncio
+    from pathlib import Path
+    from scenario_research.research_pipeline import build_research_report
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
+    report, meta = asyncio.run(
+        build_research_report(
+            question="How do we improve billable utilization?",
+            seed=9,
+            trace_id="trace-test-1",
+        )
+    )
+    assert report.report_path
+    rp = Path(report.report_path)
+    assert rp.exists()
+    text = rp.read_text()
+    assert "Scenario Research Report" in text
+    assert report.scenario_runs
+    assert report.fits
+    assert report.cost_report is not None
+    assert meta["persistence"]["records_written"] >= 2
 
 
 def test_schema_reconcile_plan_adds_only_missing_entities():

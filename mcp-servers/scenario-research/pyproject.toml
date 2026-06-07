@@ -60,6 +60,9 @@ dev-dependencies = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "integration: live service integration tests (e.g., SurrealDB container).",
+]
 
 [tool.ruff]
 line-length = 100

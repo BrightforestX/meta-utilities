@@ -117,6 +117,8 @@ Read path (implemented):
 - CLI commands:
   - `scenario-research artifacts <run_id>`
   - `scenario-research arts <run_id>`
+  - `scenario-research attributions <run_id> --period-min ... --period-max ... --aggregate ...`
+  - `scenario-research attrs <run_id> ...`
 
 Surreal envs:
 - `SURREAL_URL`
@@ -154,6 +156,25 @@ In addition to `run_scenario` and `ask`, the server now exposes:
 - `fit_models(run_id|db_path, models)` -> lightweight fit summaries (`sir`, `hawkes`, `bounded_confidence`, `bayesian_ab`)
 - `replay_policy(policy, scenario, seed, periods)` -> baseline-vs-treatment robustness deltas (implemented for `oteemo_billable`)
 - `get_run_artifacts(run_id, prefer_surreal)` -> fetch persisted ScenarioTrace/Attribution/context by run id
+- `query_attributions(run_id, period_min, period_max, level, aggregate, prefer_surreal)` -> filtered attribution rows + optional aggregates
+
+## Ask pipeline (artifact-producing)
+
+`ask` now runs a full local research pipeline (not shape-only fallback):
+
+- selects a scenario (currently `oteemo_billable`)
+- executes scenario run
+- persists artifacts via Surreal write adapter (or fallback payload)
+- computes model fit summaries + deterministic cost telemetry
+- computes baseline-vs-treatment replay robustness
+- writes a markdown report artifact to `SCENARIO_RESEARCH_REPORT_DIR` (default `.context/scenario-research-reports`)
+
+CLI:
+
+```bash
+scenario-research ask "How do we improve billable utilization?" -s 42
+scenario-research q "How do we improve billable utilization?" -s 42
+```
 
 ## PostgreSQL
 

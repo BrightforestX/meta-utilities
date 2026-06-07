@@ -737,6 +737,92 @@ class ScenarioSurrealReader:
                 return out
         return fb
 
+    @staticmethod
+    def _filter_attributions(
+        rows: list[dict[str, Any]],
+        *,
+        period_min: int | None = None,
+        period_max: int | None = None,
+        level: str | None = None,
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if period_min is not None:
+                try:
+                    if int(row.get("period", -10**9)) < period_min:
+                        continue
+                except Exception:
+                    continue
+            if period_max is not None:
+                try:
+                    if int(row.get("period", 10**9)) > period_max:
+                        continue
+                except Exception:
+                    continue
+            if level and str(row.get("level", "")).lower() != level.lower():
+                continue
+            out.append(row)
+        return out
+
+    @staticmethod
+    def _aggregate_attributions(rows: list[dict[str, Any]], aggregate: str | None) -> dict[str, Any] | None:
+        if not aggregate:
+            return None
+        agg = aggregate.strip().lower()
+        if agg == "sum_cost_by_level":
+            buckets: dict[str, dict[str, float | int]] = {}
+            for row in rows:
+                key = str(row.get("level", "unknown"))
+                cur = buckets.setdefault(key, {"count": 0, "sum_cost": 0.0})
+                cur["count"] = int(cur["count"]) + 1
+                try:
+                    cur["sum_cost"] = float(cur["sum_cost"]) + float(row.get("cost") or 0.0)
+                except Exception:
+                    pass
+            return {"kind": "sum_cost_by_level", "buckets": buckets}
+        if agg == "sum_delta_by_period":
+            buckets: dict[str, dict[str, float | int]] = {}
+            for row in rows:
+                key = str(row.get("period", "unknown"))
+                cur = buckets.setdefault(key, {"count": 0, "sum_delta": 0.0})
+                cur["count"] = int(cur["count"]) + 1
+                try:
+                    cur["sum_delta"] = float(cur["sum_delta"]) + float(row.get("delta") or 0.0)
+                except Exception:
+                    pass
+            return {"kind": "sum_delta_by_period", "buckets": buckets}
+        return {"kind": agg, "warning": "unsupported_aggregate"}
+
+    def query_attributions(
+        self,
+        run_id: str,
+        *,
+        period_min: int | None = None,
+        period_max: int | None = None,
+        level: str | None = None,
+        aggregate: str | None = None,
+        prefer_surreal: bool = True,
+    ) -> dict[str, Any]:
+        art = self.get_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+        rows = art.get("attributions", []) or []
+        if not isinstance(rows, list):
+            rows = []
+        filtered = self._filter_attributions(rows, period_min=period_min, period_max=period_max, level=level)
+        aggregates = self._aggregate_attributions(filtered, aggregate=aggregate)
+        return {
+            "backend": art.get("backend"),
+            "found": bool(art.get("found")),
+            "run_id": run_id,
+            "filters": {
+                "period_min": period_min,
+                "period_max": period_max,
+                "level": level,
+            },
+            "count": len(filtered),
+            "rows": filtered,
+            "aggregate": aggregates,
+        }
+
 
 def persist_run_artifacts(
     run: ScenarioRun,
@@ -755,6 +841,27 @@ def fetch_run_artifacts(run_id: str, *, prefer_surreal: bool = True) -> dict[str
     return reader.get_run_artifacts(run_id, prefer_surreal=prefer_surreal)
 
 
+def query_run_attributions(
+    run_id: str,
+    *,
+    period_min: int | None = None,
+    period_max: int | None = None,
+    level: str | None = None,
+    aggregate: str | None = None,
+    prefer_surreal: bool = True,
+) -> dict[str, Any]:
+    """Fetch + filter/aggregate attribution rows for a run."""
+    reader = ScenarioSurrealReader()
+    return reader.query_attributions(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
+    )
+
+
 def get_typed_helpers() -> dict[str, Any]:
     """Return adapter and helper references for call sites/tests."""
     return {
@@ -765,4 +872,5 @@ def get_typed_helpers() -> dict[str, Any]:
         "reader": ScenarioSurrealReader,
         "persist": persist_run_artifacts,
         "fetch": fetch_run_artifacts,
+        "query_attributions": query_run_attributions,
     }

@@ -15,8 +15,9 @@ import asyncio
 
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
-from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts
+from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts, query_run_attributions
 from .observability import traced
+from .research_pipeline import build_research_report
 from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
 from .scaffold_adapter import execute_scenario
 from .validation import validate_before_run
@@ -160,50 +161,61 @@ def _run_impl(
 
 
 def _ask_impl(question: str, seed: int | None = 42) -> None:
-    """P4 flow: ask delegates to scaffold workforce when importable, else surfaces ResearchReport shape."""
+    """Run full ask pipeline and emit a report artifact summary."""
     trace = traced(
         name="scenario_research.cli.ask",
         inputs={"question": question, "seed": seed},
         metadata={"surface": "cli"},
     )
-    try:
-        from src.auto_research.workforce import build_workforce  # type: ignore
-        from camel.tasks import Task  # type: ignore
-        wf = build_workforce()
-        task = Task(content=question, id="user_question")
-        res = wf.process_task(task)
-        trace.record_step(
-            name="workforce_process_task",
-            inputs={"question": question},
-            outputs={"result_type": type(res.result).__name__},
-            reasoning_summary="Used scaffold workforce path for deep ask flow.",
+    report, meta = asyncio.run(build_research_report(question=question, seed=seed, trace_id=trace.trace_id))
+    trace.record_step(
+        name="build_research_report",
+        inputs={"question": question, "seed": seed},
+        outputs={
+            "report_id": report.report_id,
+            "report_path": report.report_path,
+            "scenario_runs": [r.run_id for r in report.scenario_runs],
+            "fits": [f.model for f in report.fits],
+        },
+        reasoning_summary="Built full research report pipeline with run, fits, cost telemetry, and persisted artifacts.",
+        metadata={"pipeline_meta": meta},
+    )
+    if report.report_path:
+        trace.record_artifact(
+            path=report.report_path,
+            kind="research_report_markdown",
+            created_by_step="build_research_report",
+            metadata={"report_id": report.report_id},
         )
-        trace.finalize(outputs={"path": "workforce", "seed": seed})
-        print(res.result)
-    except Exception:
-        from .models import ResearchReport, CostReport
-        from datetime import datetime, timezone
-        rid = f"ask-{abs(hash(question)) % 10**8}"
-        rpt = ResearchReport(
-            report_id=rid,
-            question=question,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            seed=seed,
-            cost_report=CostReport(run_id=rid),
-        )
-        trace.record_step(
-            name="fallback_research_report_shape",
-            inputs={"question": question, "seed": seed},
-            outputs={"report_id": rid},
-            reasoning_summary="Fallback path returned typed ResearchReport when workforce runtime was unavailable.",
-        )
-        trace.finalize(outputs={"path": "fallback", "report_id": rid, "seed": seed})
-        print(rpt.model_dump())
+    for run in report.scenario_runs:
+        trace.record_artifacts_from_run(run, created_by_step="build_research_report")
+    trace.finalize(outputs={"report_id": report.report_id, "seed": seed})
+    print(report.model_dump())
 
 
 def _artifacts_impl(run_id: str, prefer_surreal: bool = True) -> None:
     """Fetch persisted run artifacts from Surreal or fallback payload files."""
     out = fetch_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+    print(out)
+
+
+def _attributions_impl(
+    run_id: str,
+    *,
+    period_min: int | None = None,
+    period_max: int | None = None,
+    level: str | None = None,
+    aggregate: str | None = None,
+    prefer_surreal: bool = True,
+) -> None:
+    out = query_run_attributions(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
+    )
     print(out)
 
 
@@ -304,6 +316,54 @@ def artifacts_short(
 ) -> None:
     """Short alias for artifacts."""
     _artifacts_impl(run_id=run_id, prefer_surreal=prefer_surreal)
+
+
+@app.command()
+def attributions(
+    run_id: str = typer.Argument(..., help="Scenario run_id to query attribution rows for."),
+    period_min: int | None = typer.Option(None, "--period-min", help="Filter for period >= value."),
+    period_max: int | None = typer.Option(None, "--period-max", help="Filter for period <= value."),
+    level: str | None = typer.Option(None, "--level", help="Filter by attribution level."),
+    aggregate: str | None = typer.Option(
+        None,
+        "--aggregate",
+        help="Aggregate helper: sum_cost_by_level | sum_delta_by_period",
+    ),
+    prefer_surreal: bool = typer.Option(
+        True,
+        "--prefer-surreal/--prefer-fallback",
+        help="Try Surreal first (default) or go straight to local fallback payload.",
+    ),
+) -> None:
+    """Query run attributions with filters and aggregate helpers."""
+    _attributions_impl(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
+    )
+
+
+@app.command("attrs")
+def attributions_short(
+    run_id: str = typer.Argument(...),
+    period_min: int | None = typer.Option(None, "--period-min"),
+    period_max: int | None = typer.Option(None, "--period-max"),
+    level: str | None = typer.Option(None, "--level"),
+    aggregate: str | None = typer.Option(None, "--aggregate"),
+    prefer_surreal: bool = typer.Option(True, "--prefer-surreal/--prefer-fallback"),
+) -> None:
+    """Short alias for attributions."""
+    _attributions_impl(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
+    )
 
 
 @app.command()

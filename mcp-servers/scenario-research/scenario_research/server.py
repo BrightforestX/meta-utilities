@@ -23,9 +23,10 @@ from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
 from .analytics import estimate_cost_report, fit_models_from_trace, load_trace_payload
-from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts
+from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts, query_run_attributions
 from .observability import traced
 from .optimization.replay import replay_policy as replay_policy_robustness
+from .research_pipeline import build_research_report
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
@@ -172,34 +173,40 @@ async def run_scenario(
 
 @mcp.tool()
 async def ask(question: str, seed: int | None = 42, ctx: Context | None = None) -> ResearchReport:
-    """(P4 flow) End-to-end ask delegating to scaffold workforce when available.
-
-    Returns a ResearchReport DTO. In full env this will populate report_path, fits, cost_report.
-    """
+    """End-to-end ask that produces report artifact, fits, costs, and scenario runs."""
     trace = traced(
         name="scenario_research.mcp.ask",
         inputs={"question": question, "seed": seed},
         metadata={"surface": "mcp"},
     )
-    # For wiring completeness we return a shaped report; real call to scaffold.ask would populate.
-    # (The scaffold cli.ask does the workforce; we keep surface here without duplicating logic.)
-    from datetime import datetime, timezone
-
-    rid = f"ask-{abs(hash(question)) % 10**8}"
-    report = ResearchReport(
-        report_id=rid,
+    report, meta = await build_research_report(
         question=question,
-        created_at=datetime.now(timezone.utc).isoformat(),
         seed=seed,
-        cost_report=CostReport(run_id=rid),
+        trace_id=trace.trace_id,
     )
     trace.record_step(
-        name="build_research_report_shape",
+        name="build_research_report",
         inputs={"question": question, "seed": seed},
-        outputs={"report_id": rid},
-        reasoning_summary="Returned a typed ResearchReport shape from MCP ask surface.",
+        outputs={
+            "report_id": report.report_id,
+            "report_path": report.report_path,
+            "scenario_runs": [r.run_id for r in report.scenario_runs],
+            "fits": [f.model for f in report.fits],
+        },
+        reasoning_summary="Built full research report pipeline with run, fits, cost telemetry, and persisted artifacts.",
+        metadata={"pipeline_meta": meta},
     )
-    trace.finalize(outputs={"report_id": rid, "seed": seed})
+    if report.report_path:
+        trace.record_artifact(
+            path=report.report_path,
+            kind="research_report_markdown",
+            created_by_step="build_research_report",
+            metadata={"report_id": report.report_id},
+        )
+    for run in report.scenario_runs:
+        trace.record_artifacts_from_run(run, created_by_step="build_research_report")
+        _RUN_CACHE[run.run_id] = run
+    trace.finalize(outputs={"report_id": report.report_id, "seed": seed})
     return report
 
 
@@ -248,6 +255,27 @@ async def get_run_artifacts(
 ) -> dict[str, Any]:
     """Fetch persisted scenario artifacts by run_id."""
     return fetch_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+
+
+@mcp.tool()
+async def query_attributions(
+    run_id: str,
+    period_min: int | None = None,
+    period_max: int | None = None,
+    level: str | None = None,
+    aggregate: str | None = None,
+    prefer_surreal: bool = True,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Query attribution rows by run with optional filters and aggregate helper."""
+    return query_run_attributions(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
+    )
 
 
 @mcp.tool()
