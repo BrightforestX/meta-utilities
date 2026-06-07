@@ -366,6 +366,25 @@ def _extract_schema_from_info_payload(payload: dict[str, Any]) -> dict[str, Any]
     return {"tables": tables}
 
 
+def _extract_rows_from_sql_response(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    body = payload.get("response")
+    if not isinstance(body, list):
+        return rows
+    for stmt in body:
+        if not isinstance(stmt, dict):
+            continue
+        result = stmt.get("result")
+        if isinstance(result, list):
+            for rec in result:
+                if isinstance(rec, dict):
+                    if "result" in rec and isinstance(rec["result"], dict):
+                        rows.append(rec["result"])
+                    else:
+                        rows.append(rec)
+    return rows
+
+
 class SurrealHTTP:
     """Very small Surreal HTTP wrapper (no external deps)."""
 
@@ -430,6 +449,10 @@ class SurrealHTTP:
             return _extract_schema_from_info_payload(payload)
         except Exception:
             return {"tables": {}}
+
+    def query_rows(self, sql: str) -> list[dict[str, Any]]:
+        payload = self.execute_sql(sql)
+        return _extract_rows_from_sql_response(payload)
 
 
 class ScenarioSurrealWriter:
@@ -553,6 +576,8 @@ class ScenarioSurrealWriter:
             policy_id = f"{run.run_id}:{pdr.get('period', idx + 1)}"
             attributions.append(
                 {
+                    "run_id": run.run_id,
+                    "period": int(pdr.get("period", idx + 1)),
                     "policy_id": policy_id,
                     "delta": pdr.get("delta_util"),
                     "cost": pdr.get("invest_cost"),
@@ -628,6 +653,91 @@ class ScenarioSurrealWriter:
         }
 
 
+class ScenarioSurrealReader:
+    """Read scenario artifacts from Surreal when available, else fallback files."""
+
+    def __init__(self, *, surreal: SurrealHTTP | None = None, fallback_dir: Path | None = None) -> None:
+        self.fallback_dir = fallback_dir or _default_fallback_dir()
+        self.fallback_dir.mkdir(parents=True, exist_ok=True)
+        self.surreal = surreal or self._from_env()
+
+    def _from_env(self) -> SurrealHTTP | None:
+        url = os.environ.get("SURREAL_URL")
+        if not url:
+            return None
+        return SurrealHTTP(
+            base_url=url,
+            namespace=os.environ.get("SURREAL_NS", "odrs"),
+            database=os.environ.get("SURREAL_DB", "memory"),
+            username=os.environ.get("SURREAL_USER"),
+            password=os.environ.get("SURREAL_PASS"),
+            timeout_sec=float(os.environ.get("SURREAL_TIMEOUT_SEC", "2.0")),
+        )
+
+    def _read_fallback(self, run_id: str) -> dict[str, Any]:
+        fp = self.fallback_dir / f"{run_id}.json"
+        if not fp.exists():
+            return {"backend": "fallback", "found": False, "reason": "fallback_file_missing", "run_id": run_id}
+        try:
+            payload = json.loads(fp.read_text())
+        except Exception as exc:
+            return {
+                "backend": "fallback",
+                "found": False,
+                "reason": f"fallback_parse_error:{type(exc).__name__}",
+                "run_id": run_id,
+                "fallback_path": str(fp),
+            }
+        records = payload.get("records", {})
+        return {
+            "backend": "fallback",
+            "found": True,
+            "run_id": run_id,
+            "fallback_path": str(fp),
+            "scenario_trace": records.get("scenario_trace"),
+            "attributions": records.get("attributions", []),
+            "live_business_context": records.get("live_business_context"),
+        }
+
+    def _query_surreal(self, run_id: str) -> dict[str, Any]:
+        if self.surreal is None or not self.surreal.is_healthy():
+            return {"backend": "fallback", "found": False, "reason": "surreal_unavailable", "run_id": run_id}
+        run_literal = json.dumps(run_id)
+        traces = self.surreal.query_rows(f"SELECT * FROM ScenarioTrace WHERE run_id = {run_literal};")
+        attributions = self.surreal.query_rows(f"SELECT * FROM Attribution WHERE run_id = {run_literal};")
+        context = None
+        if traces:
+            ref = traces[0].get("live_business_context_ref")
+            if ref:
+                rid = str(ref)
+                ctx_rows = self.surreal.query_rows(f"SELECT * FROM LiveBusinessContext:{rid};")
+                if ctx_rows:
+                    context = ctx_rows[0]
+        return {
+            "backend": "surreal",
+            "found": bool(traces),
+            "run_id": run_id,
+            "scenario_trace": traces[0] if traces else None,
+            "attributions": attributions,
+            "live_business_context": context,
+        }
+
+    def get_run_artifacts(self, run_id: str, *, prefer_surreal: bool = True) -> dict[str, Any]:
+        if prefer_surreal:
+            out = self._query_surreal(run_id)
+            if out.get("found"):
+                return out
+        fb = self._read_fallback(run_id)
+        if fb.get("found"):
+            return fb
+        if prefer_surreal:
+            # return surreal lookup context if fallback missing and surreal probe had richer reason
+            out = self._query_surreal(run_id)
+            if out.get("reason"):
+                return out
+        return fb
+
+
 def persist_run_artifacts(
     run: ScenarioRun,
     *,
@@ -639,6 +749,12 @@ def persist_run_artifacts(
     return writer.store_scenario_run(run, trace_id=trace_id, ontology_ref=ontology_ref)
 
 
+def fetch_run_artifacts(run_id: str, *, prefer_surreal: bool = True) -> dict[str, Any]:
+    """Fetch persisted run artifacts from Surreal or fallback payload files."""
+    reader = ScenarioSurrealReader()
+    return reader.get_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+
+
 def get_typed_helpers() -> dict[str, Any]:
     """Return adapter and helper references for call sites/tests."""
     return {
@@ -646,5 +762,7 @@ def get_typed_helpers() -> dict[str, Any]:
         "schema_spec": compile_linkml_schema_spec,
         "schema_reconcile": plan_schema_reconcile,
         "writer": ScenarioSurrealWriter,
+        "reader": ScenarioSurrealReader,
         "persist": persist_run_artifacts,
+        "fetch": fetch_run_artifacts,
     }

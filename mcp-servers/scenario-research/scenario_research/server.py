@@ -23,7 +23,7 @@ from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
 from .analytics import estimate_cost_report, fit_models_from_trace, load_trace_payload
-from .linkml_surreal import persist_run_artifacts
+from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts
 from .observability import traced
 from .optimization.replay import replay_policy as replay_policy_robustness
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
@@ -238,6 +238,16 @@ async def replay_policy(
 ) -> dict[str, Any]:
     """Replay candidate policy vs baseline and return robustness deltas."""
     return replay_policy_robustness(policy, scenario=scenario, seed=seed, periods=periods)
+
+
+@mcp.tool()
+async def get_run_artifacts(
+    run_id: str,
+    prefer_surreal: bool = True,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Fetch persisted scenario artifacts by run_id."""
+    return fetch_run_artifacts(run_id, prefer_surreal=prefer_surreal)
 
 
 @mcp.tool()

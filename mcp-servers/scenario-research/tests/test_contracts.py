@@ -342,6 +342,31 @@ def test_server_cost_report_and_fit_models_tools(tmp_path):
     assert fits[0]["model"] == "sir"
     assert fits[1]["model"] == "bayesian_ab"
 
+    fb_dir = tmp_path / "sf"
+    fb_dir.mkdir(parents=True, exist_ok=True)
+    (fb_dir / f"{run.run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run.run_id, "period": 4},
+                    "attributions": [],
+                    "live_business_context": {"signals": {"run_id": run.run_id}},
+                }
+            }
+        )
+    )
+    old_env = __import__("os").environ.get("SCENARIO_SURREAL_FALLBACK_DIR")
+    __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = str(fb_dir)
+    try:
+        artifacts = asyncio.run(server_mod.get_run_artifacts(run_id=run.run_id, prefer_surreal=False))
+    finally:
+        if old_env is None:
+            __import__("os").environ.pop("SCENARIO_SURREAL_FALLBACK_DIR", None)
+        else:
+            __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = old_env
+    assert artifacts["found"] is True
+    assert artifacts["scenario_trace"]["run_id"] == run.run_id
+
 
 
 def test_p4_scaffold_gap_modules_importable():
@@ -825,6 +850,78 @@ def test_scenario_surreal_writer_upsert_ids_are_deterministic(tmp_path):
     # calls[1] and calls[3] are the write statements (calls[0]/[2] are schema reconcile SQL)
     assert "UPSERT ScenarioTrace:" in fake.calls[1]
     assert fake.calls[1] == fake.calls[3], "Repeated writes for same run must be deterministic and idempotent"
+
+
+def test_fetch_run_artifacts_reads_fallback_payload(tmp_path, monkeypatch):
+    import json
+    from scenario_research.linkml_surreal import fetch_run_artifacts
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-fallback-read"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id, "period": 2},
+                    "attributions": [{"run_id": run_id, "policy_id": f"{run_id}:1"}],
+                    "live_business_context": {"signals": {"run_id": run_id}},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    out = fetch_run_artifacts(run_id, prefer_surreal=False)
+    assert out["backend"] == "fallback"
+    assert out["found"] is True
+    assert out["scenario_trace"]["run_id"] == run_id
+
+
+def test_scenario_surreal_reader_prefers_surreal_when_available(tmp_path):
+    from scenario_research.linkml_surreal import ScenarioSurrealReader
+
+    class FakeSurreal:
+        def is_healthy(self):
+            return True
+
+        def query_rows(self, sql: str):
+            if "FROM ScenarioTrace" in sql:
+                return [{"run_id": "run-surreal-read", "period": 2, "live_business_context_ref": "ctx-1"}]
+            if "FROM Attribution" in sql:
+                return [{"run_id": "run-surreal-read", "policy_id": "run-surreal-read:1"}]
+            if "FROM LiveBusinessContext:ctx-1" in sql:
+                return [{"signals": {"run_id": "run-surreal-read"}}]
+            return []
+
+    reader = ScenarioSurrealReader(surreal=FakeSurreal(), fallback_dir=tmp_path / "sf")  # type: ignore[arg-type]
+    out = reader.get_run_artifacts("run-surreal-read", prefer_surreal=True)
+    assert out["backend"] == "surreal"
+    assert out["found"] is True
+    assert out["scenario_trace"]["run_id"] == "run-surreal-read"
+    assert len(out["attributions"]) == 1
+
+
+def test_cli_artifacts_impl_fetches_payload(tmp_path, monkeypatch):
+    import json
+    import scenario_research.cli as cli_mod
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-cli-artifacts"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps({"records": {"scenario_trace": {"run_id": run_id}, "attributions": [], "live_business_context": {}}})
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._artifacts_impl(run_id, prefer_surreal=False)
+    assert captured["payload"]["found"] is True
+    assert captured["payload"]["scenario_trace"]["run_id"] == run_id
 
 
 def test_schema_reconcile_plan_adds_only_missing_entities():

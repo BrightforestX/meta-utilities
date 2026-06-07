@@ -15,7 +15,7 @@ import asyncio
 
 from . import __version__
 from .agent_compiler import compile_scenario_spec, list_ontology_refs, resolve_ontology_base
-from .linkml_surreal import persist_run_artifacts
+from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts
 from .observability import traced
 from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
 from .scaffold_adapter import execute_scenario
@@ -201,6 +201,12 @@ def _ask_impl(question: str, seed: int | None = 42) -> None:
         print(rpt.model_dump())
 
 
+def _artifacts_impl(run_id: str, prefer_surreal: bool = True) -> None:
+    """Fetch persisted run artifacts from Surreal or fallback payload files."""
+    out = fetch_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+    print(out)
+
+
 @app.command()
 def version() -> None:
     """Print package version."""
@@ -276,6 +282,28 @@ def providers_short(
 ) -> None:
     """Short alias for providers."""
     providers(active_only=active_only, timeout_sec=timeout_sec)
+
+
+@app.command()
+def artifacts(
+    run_id: str = typer.Argument(..., help="Scenario run_id to fetch persisted artifacts for."),
+    prefer_surreal: bool = typer.Option(
+        True,
+        "--prefer-surreal/--prefer-fallback",
+        help="Try Surreal first (default) or go straight to local fallback payload.",
+    ),
+) -> None:
+    """Fetch persisted run artifacts (ScenarioTrace/Attribution/context)."""
+    _artifacts_impl(run_id=run_id, prefer_surreal=prefer_surreal)
+
+
+@app.command("arts")
+def artifacts_short(
+    run_id: str = typer.Argument(...),
+    prefer_surreal: bool = typer.Option(True, "--prefer-surreal/--prefer-fallback"),
+) -> None:
+    """Short alias for artifacts."""
+    _artifacts_impl(run_id=run_id, prefer_surreal=prefer_surreal)
 
 
 @app.command()
