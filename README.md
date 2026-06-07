@@ -1,0 +1,78 @@
+# meta-utilities
+
+**Personal AI Meta-Utilities** — A portable, self-contained toolkit for high-leverage agent capabilities that travel with you across every project.
+
+## What This Is
+
+This is the canonical home for the non-project-specific AI engineering infrastructure I have developed and refined (primarily while working on Axiom at Oteemo, but deliberately extracted to be general).
+
+It implements the full recommendations from the deep research on abstracting:
+- Deep research capabilities (Perplexity `sonar-deep-research` + Grok fallback via a production-grade MCP server)
+- Token optimization stack (smart retrieval, output compression, hierarchical memory)
+- First-class integration with **turbovec** (my high-compression vector library)
+- Durable memory patterns (PARA unification + episodic/semantic/procedural layers)
+- Reliable long-running tool patterns (especially the two-layer timeout model for research agents)
+
+## Core Components
+
+- **mcp-servers/deep-research/** — The star extraction. A packaged, installable FastMCP server with excellent structured output, citations, progress, and robust support for 2–20+ minute research jobs.
+- **mcp-servers/batch-orchestrator/** — YAML-driven batch queue for deep research, inference, and multi-stage pipelines with hybrid realtime/batch provider routing (`meta-batch` CLI + MCP).
+- **mcp-servers/scenario-research/** (with `oteemo/` vertical) — Ontology-governed autonomous business scenario research & optimization (ODRS). Includes the self-contained oteemo_billable discrete-firm simulation (Raja/Arka/Rod/Clifford governed leadership agents via LinkML-style YAML), PuLP optimization + replay, reports, and the `scenario-research` + `scenario-research-mcp` surfaces.
+- **cli/oteemo-assistant/** — Opt-in Node + Ink TUI (assistant-ui/react-ink) for interactive oteemo runs + reports with custom leader cards, sparklines, and first-class live business context pulls via sibling px-mcp (Composio/Arcade proxies for Gmail/Slack/Calendar/Salesforce/Notion etc.). Pure Python paths remain fully functional.
+- **skills/context-forge/** — The central intelligence layer for context engineering (smart retrieval discipline, compression, memory unification, turbovec indexing helpers). Fully portable.
+- **skills/deep-research/** — Thin, generalized Grok/Cursor/Claude skill wrapper that prefers the MCP.
+- **skills/batch-research/** — Thin skill for YAML job manifests and batch orchestration.
+- **templates/** — Ready-to-use, portable fragments for `.grok/config.toml`, `.cursor/mcp.json`, `.context/` configuration (including the proven long-running timeout patterns).
+- **scripts/** — Bootstrap + installation helpers so a brand-new project can get the full power user stack in minutes.
+- **docs/** — Living documentation of the patterns (timeout discipline, memory unification, turbovec integration, how to wire skills/MCPs into agent homes).
+
+## Quick Start (New Project)
+
+```bash
+# 1. Clone or copy this repo (or the relevant subdirs)
+cd /path/to/your/new-project
+
+# 2. Run the bootstrap (once implemented)
+# ./meta-utilities/scripts/bootstrap.sh   # or equivalent
+
+# 3. Follow the printed instructions for MCP registration + skill symlinks
+
+# 4. Start a Grok Build, Cursor, or Claude Code session and enjoy:
+#    /deep-research "your ambitious question here"
+#    meta-batch run path/to/jobs.yaml
+#    context-forge on this project
+```
+
+See `docs/abstraction-roadmap.md` for the full rationale and `docs/skill-install-patterns.md` for the recommended wiring into `~/.grok/skills/`, `~/.claude/skills/`, etc.
+
+## Design Principles
+
+- **Portability first** — Zero hard-coded project paths (no oteemo leakage). Use relative references, `$META_UTILITIES_HOME`, or clean package entrypoints.
+- **Proven 2026 patterns** — Follows monorepo-for-agent-tooling consensus, FastMCP packaging best practices (uv + Docker), dual `.agents/skills/` + agent-home layouts, and the skill + MCP separation.
+- **Self-improving** — The toolkit itself is dogfoodable with its own components (context-forge on meta-utilities, deep research on packaging questions).
+- **Graduated adoption** — You can use individual pieces (just the MCP, just the skill, just the templates) without buying the whole thing.
+
+## Relationship to Other Work
+
+- **turbovec** (my Rust + Python quantized vector library) remains in its primary location. This repo provides the best-practice integration surface and helpers.
+- **para-memory-files** (the excellent PARA-based memory skill) is a peer/dependency for the memory layer. Context Forge is the evolutionary intelligence + retrieval layer on top.
+- Everything here is deliberately extracted from project-specific work so it compounds on *every* future project.
+
+## Status
+
+Actively progressing toward 100% completion per the Gap Closure Plan.
+
+See:
+- `docs/gap-analysis.md` for current percentages per feature
+- `NEXT.md` for prioritized next items
+- `docs/abstraction-roadmap.md` for overall vision
+
+Recent progress: Context Forge generalization largely complete, key docs finished, bootstrap improved with wiring support, Deep Research MCP packaging and documentation strengthened, **Batch Orchestrator MCP** (YAML queue + hybrid batch/realtime + multi-stage pipeline), INSTALLATION.md added.
+
+Current focus: Verification of batch-orchestrator in real agent hosts + expanding example manifests.
+
+Contributions / suggestions for generalization are welcome.
+
+---
+
+*Built for the long game. Context is the most expensive resource in agentic work — treat it as infrastructure.*

@@ -1,0 +1,27 @@
+# Context Forge starter config
+# Copy to .context/config.yaml in your project
+
+retrieval:
+  prefer_structural: true
+  max_symbol_tokens: 3500
+
+memory:
+  backend: "para"
+  auto_decay: true
+
+compression:
+  enabled: true
+  default_level: "balanced"
+
+vector:
+  enabled: true
+  turbovec:
+    enabled: true
+  engine: "turbovec"  # local default (Phase 0); weaviate optional for distributed
+  bit_width: 4
+  weaviate:
+    enabled: false
+    url: "${WEAVIATE_URL:-http://localhost:8080}"
+    api_key_env: "WEAVIATE_API_KEY"
+    collection: "meta_knowledge"
+    # Optional: let Weaviate quantize further (pq/bq/rq) on top of client vectors

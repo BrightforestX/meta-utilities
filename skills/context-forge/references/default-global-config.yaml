@@ -1,0 +1,48 @@
+# Context Forge - Recommended Global Default Configuration
+#
+# Location: ~/.context/config.yaml
+#
+# This is the conservative, "set and forget" global baseline.
+# Most power users should start here and only override per-project when needed.
+
+retrieval:
+  prefer_structural: true
+  max_symbol_tokens: 3500
+  default_engines:
+    - structural
+    - semantic
+
+memory:
+  backend: "para"                    # Start by evolving your existing para-memory-files setup
+  auto_decay: true
+  layers:
+    - working
+    - episodic
+    - semantic
+    - procedural
+
+compression:
+  enabled: true
+  default_level: "balanced"          # conservative | balanced | aggressive
+  auto_compress_tool_output: true
+
+vector:
+  enabled: true                      # Enable by default for knowledge bases
+  default_engine: "turbovec"
+  bit_width: 4
+  auto_index_knowledge_folders: true # When setup-project.py detects docs/, specs/, etc.
+
+integrations:
+  cursor:
+    prefer_mcp: true
+    auto_connect_mcp: true
+  claude_code:
+    prefer_mcp: true
+    auto_connect_mcp: true
+  grok:
+    auto_load_skill: true
+
+# KV Cache (only relevant when doing local/long-context inference)
+kv_cache:
+  guidance_enabled: true
+  default_for_local: "quantized"     # none | quantized | aggressive

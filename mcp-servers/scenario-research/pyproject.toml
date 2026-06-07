@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scenario-research-mcp"
+version = "0.1.0"
+description = "Ontology-governed autonomous business scenario research and optimization platform (ODRS) MCP server. Extends camel-oasis-scaffold with MCP interface, governed YAML agents, hybrid routing, math fits, cost telemetry, and batch-orchestrator integration."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+  {name = "Clifford Dalson III"}
+]
+dependencies = [
+  "fastmcp>=3",
+  "pydantic>=2",
+  "pyyaml>=6",
+  "typer>=0.12",
+  "rich>=13.7",
+]
+
+[project.optional-dependencies]
+oasis = [
+  # The camel-oasis-scaffold is co-located; install via:
+  # uv pip install -e ../camel-oasis-scaffold
+  # Heavy deps (camel-ai, pymc, etc.) come from the scaffold's pyproject.
+]
+research = [
+  "turbovec",
+  "weaviate-client>=4",
+  "sentence-transformers>=2.2",
+  "tiktoken>=0.7",
+]
+opt = [
+  "pulp>=2.7",
+  "ortools>=9.0; platform_system != 'Darwin' or platform_machine != 'arm64'",
+]
+
+[project.scripts]
+scenario-research-mcp = "scenario_research.server:main"
+scenario-research = "scenario_research.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/clifforddalsoniii/meta-utilities"
+Repository = "https://github.com/clifforddalsoniii/meta-utilities/tree/main/mcp-servers/scenario-research"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scenario_research"]
+
+[tool.uv]
+dev-dependencies = [
+  "pytest",
+  "pytest-asyncio",
+  "ruff",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

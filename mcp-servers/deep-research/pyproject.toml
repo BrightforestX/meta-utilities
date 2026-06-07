@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deep-research-mcp"
+version = "0.2.0"
+description = "Production-grade MCP server for long-running deep research (Perplexity sonar-deep-research primary + Grok fallback)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+  {name = "Clifford Dalson III"}
+]
+dependencies = [
+  "fastmcp>=3",
+  "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+research = [
+  "turbovec",
+  "weaviate-client>=4",
+  "sentence-transformers>=2.2",
+  "numpy>=1.24",
+  "tiktoken>=0.7",  # for real token stats in measure + compress hooks
+]
+firecrawl = []  # external: npm firecrawl-cli (scripts/install-firecrawl.sh) or npx @mendable/firecrawl-mcp (pre-wired in templates/grok + cursor/mcp.json)
+# research-memory is separate package (uv tool install -e mcp-servers/research-memory); hooks use direct import or CLI
+
+[project.scripts]
+deep-research-mcp = "deep_research_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/clifforddalsoniii/meta-utilities"
+Repository = "https://github.com/clifforddalsoniii/meta-utilities/tree/main/mcp-servers/deep-research"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.uv]
+dev-dependencies = [
+  "pytest",
+]

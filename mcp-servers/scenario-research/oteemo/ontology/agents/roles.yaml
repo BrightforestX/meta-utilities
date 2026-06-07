@@ -1,0 +1,46 @@
+# Governed CAMEL agent roles for ODRS (P2) — Oteemo leadership slice
+# This is the source of truth for the oteemo_billable scenario's distinct leadership decision agents.
+# Runtime CAMEL roles are compiled from this (via agent_compiler with oteemo ontology_base).
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+roles:
+  # ============================================================
+  # OTEEMO LEADERSHIP DECISION AGENTS (governed, distinct, not population)
+  # Derived from ontology LeadershipRole + primary_accountabilities.
+  # These drive policy levers in oteemo_billable scenario.
+  # Kind "leadership_decision" signals firm-level governors (vs identical oasis_agents).
+  # Compiled by existing agent_compiler; versioned with odrs-agents/1.
+  # ============================================================
+  - name: raja_gudepu_ceo
+    kind: leadership_decision
+    description: "Founder & CEO; overall strategy + explicit owner of AI FinOps / prompt intelligence mandate for Axiom (internal_platform). Prioritizes long-term leverage and cost attribution (PolicyDecisionRecord style)."
+    model_endpoint: frontier
+    tools: ["axiom_invest_lever", "finops_policy", "bid_go_decision", "risk_control"]
+    policies: ["axiom_min_progress", "finops_cost_attribution", "cost_control"]
+    primary_accountability: "Overall strategy; explicit owner of AI FinOps and prompt intelligence mandate within Axiom"
+
+  - name: arkaprava_chaudhuri_vp_tech
+    kind: leadership_decision
+    description: "VP, Technology; platform architecture (A2A, GraphRAG, orchestrator). Levers drive efficiency/productivity multipliers and knowledge effects on win rate."
+    model_endpoint: frontier
+    tools: ["arch_invest_lever", "efficiency_policy", "knowledge_boost"]
+    policies: ["platform_leverage", "safety"]
+    primary_accountability: "Platform architecture, gRPC orchestrator, A2A bus, Agent SDK, GraphRAG/Taxonomy"
+
+  - name: roderick_kelly_fed_delivery
+    kind: leadership_decision
+    description: "Head of Delivery Operations, Federal; accountable for client-facing billable utilization, program shaping/execution (PEO IWS class), engagement mix. Primary owner of current-period billable maximization."
+    model_endpoint: frontier
+    tools: ["client_alloc_lever", "bid_aggressiveness", "engagement_mix_policy"]
+    policies: ["delivery_util_target", "escalation", "routing"]
+    primary_accountability: "Federal program delivery, shaping, and execution (Navy PEO IWS class programs)"
+
+  - name: clifford_dalson_axiom_finops
+    kind: specialist_contributor
+    description: "Contractor - Axiom Platform & AI FinOps (fixed internal_platform per ontology instances + ContractorContribution). Influences maturity build + FinOps efficiency (PDR telemetry, policy). Not a capacity allocator but fixed drag/boost factor."
+    model_endpoint: frontier
+    tools: ["finops_contrib", "pdr_attribution"]
+    policies: ["cost_attribution"]
+    engagement_type: contractor
+    fixed_to: internal_platform

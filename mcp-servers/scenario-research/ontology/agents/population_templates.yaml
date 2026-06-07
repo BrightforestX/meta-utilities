@@ -1,0 +1,25 @@
+# Population templates for profile generation and scenario setup (P2)
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+templates:
+  standard_36:
+    description: "The OASIS sample 36-profile set (user_data_36.json) used for reproducible small runs."
+    source: "data/reddit/user_data_36.json"
+    n: 36
+    platform: "reddit"
+
+  synthetic_200:
+    description: "Template for profile_gen.py to synthesize 200 agents with controlled opinion/narrative distributions."
+    generator: "profile_gen:synthetic"
+    params:
+      n: 200
+      opinion_mean: 0.5
+      opinion_std: 0.2
+      platform: "reddit"
+
+  marketing_ab_control:
+    description: "Balanced A/B populations for marketing_ab scenario."
+    n_a: 100
+    n_b: 100
+    seed: 42

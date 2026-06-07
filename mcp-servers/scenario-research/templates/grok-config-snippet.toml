@@ -1,0 +1,11 @@
+# Grok / .grok/config.toml registration example for scenario-research-mcp
+# Place or merge into your host config. Adjust paths/timeouts as needed.
+
+[mcp_servers.scenario-research]
+command = "uvx"
+args = ["scenario-research-mcp"]
+env = { SCENARIO_RESEARCH_TIMEOUT_SEC = "1800" }
+tool_timeouts = { scenario_research_health = 60, run_scenario = 3600 }
+
+# Also register the camel-oasis-scaffold driven tools if you expose ask/run via MCP surface.
+# Two-layer: client env above + this host entry.

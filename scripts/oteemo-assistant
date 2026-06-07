@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Portable shim for the oteemo-assistant ink TUI.
+# Locates the cli/oteemo-assistant package (via META_UTILITIES_HOME or walk-up to AGENTS.md),
+# ensures a node runtime, cds there, and execs the built bin (falling back to tsx dev or npx).
+# This is opt-in after the core Python stack; the Python MCP/CLI paths are unaffected.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+META_ROOT="${META_UTILITIES_HOME:-}"
+
+find_meta_root() {
+  local d="$PWD"
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/AGENTS.md" && -d "$d/mcp-servers/scenario-research" ]]; then
+      echo "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  # fallback to script location
+  d="$SCRIPT_DIR"
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/AGENTS.md" && -d "$d/mcp-servers/scenario-research" ]]; then
+      echo "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo ""
+}
+
+if [[ -z "$META_ROOT" ]]; then
+  META_ROOT="$(find_meta_root)"
+fi
+
+if [[ -z "$META_ROOT" ]]; then
+  echo "Could not locate meta-utilities root (AGENTS.md + mcp-servers/scenario-research). Set META_UTILITIES_HOME or run from inside the tree."
+  exit 1
+fi
+
+CLI_DIR="$META_ROOT/cli/oteemo-assistant"
+if [[ ! -d "$CLI_DIR" ]]; then
+  echo "cli/oteemo-assistant not found under $META_ROOT"
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found in PATH. Install Node 18+ to use the ink assistant (Python paths remain fully functional)."
+  exit 1
+fi
+
+cd "$CLI_DIR"
+
+if [[ -x "dist/cli.js" ]]; then
+  exec node dist/cli.js "$@"
+elif command -v tsx >/dev/null 2>&1; then
+  exec tsx src/cli.tsx "$@"
+else
+  echo "Falling back to npx (tsx). For faster startup: npm run build in cli/oteemo-assistant."
+  exec npx --yes tsx src/cli.tsx "$@"
+fi

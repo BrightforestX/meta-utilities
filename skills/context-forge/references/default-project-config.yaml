@@ -1,0 +1,31 @@
+# Context Forge - Recommended Per-Project Default Configuration
+#
+# Location: <project-root>/.context/config.yaml
+#
+# This file should be committed (or at least tracked) so the whole team benefits.
+# Override only what is specific to this project.
+
+retrieval:
+  prefer_structural: true
+
+memory:
+  backend: "para"   # or "forge" once you have a native backend
+
+compression:
+  enabled: true
+  default_level: "balanced"
+
+vector:
+  enabled: true
+  # Point this at your turbovec index once created
+  # index_path: ".context/knowledge.tvim"
+
+# Project-specific knowledge folders that should be auto-indexed
+knowledge_folders:
+  - docs
+  - specs
+  - architecture
+  - research
+  - decisions
+
+# Any project-specific rules or overrides go below

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "research-memory"
+version = "0.1.0"
+description = "Specialized MCP for persistent research memory (PARA files + turbovec/Weaviate citation graphs + prior report RAG)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+  {name = "Clifford Dalson III"}
+]
+dependencies = [
+  "fastmcp>=3",
+  "turbovec",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+vector = [
+  "numpy>=1.24",
+  "sentence-transformers>=2.2",
+  "weaviate-client>=4",
+]
+# firecrawl is external (no py dep); used by deep-research for grounding, this for citation verification in future
+# deep-research + batch declare the cross optional research/firecrawl groups
+
+[project.scripts]
+research-memory = "research_memory_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/clifforddalsoniii/meta-utilities"
+Repository = "https://github.com/clifforddalsoniii/meta-utilities/tree/main/mcp-servers/research-memory"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.uv]
+dev-dependencies = [
+  "pytest",
+  "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

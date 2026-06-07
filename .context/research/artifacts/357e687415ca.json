@@ -1,0 +1,13 @@
+{
+  "id": "357e687415ca",
+  "stored_at": "2026-06-04T20:39:40.553700+00:00",
+  "title": "report",
+  "tags": [
+    "spec-review-fix",
+    "vector-dedup"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "Test research artifact for spec review fixes: shared vector_backends, timeout wrappers, list_artifacts tool, README sync, plan update. Includes citation to prior work.\n",
+  "summary": "Test research artifact for spec review fixes: shared vector_backends, timeout wrappers, list_artifacts tool, README sync, plan update. Includes citation to prior work."
+}

@@ -1,0 +1,150 @@
+[
+  {
+    "title": "OASIS GitHub Repository (camel-ai/oasis)",
+    "url": "https://github.com/camel-ai/oasis"
+  },
+  {
+    "title": "OASIS Quickstart Documentation",
+    "url": "https://docs.oasis.camel-ai.org/quickstart"
+  },
+  {
+    "title": "OASIS Actions Documentation",
+    "url": "https://docs.oasis.camel-ai.org/key_modules/actions"
+  },
+  {
+    "title": "OASIS Overview Documentation",
+    "url": "https://docs.oasis.camel-ai.org/overview"
+  },
+  {
+    "title": "OASIS Twitter Interview Cookbook",
+    "url": "https://docs.oasis.camel-ai.org/cookbooks/twitter_interview"
+  },
+  {
+    "title": "OASIS arXiv Paper v4 (with Database Schema Appendix D.2)",
+    "url": "https://arxiv.org/html/2411.11581v4"
+  },
+  {
+    "title": "CAMEL Workforce Documentation",
+    "url": "https://docs.camel-ai.org/key_modules/workforce"
+  },
+  {
+    "title": "CAMEL Models Documentation (ModelFactory, ModelPlatformType)",
+    "url": "https://docs.camel-ai.org/key_modules/models"
+  },
+  {
+    "title": "CAMEL Tools Documentation (SearchToolkit, BrowserToolkit, etc.)",
+    "url": "https://docs.camel-ai.org/key_modules/tools"
+  },
+  {
+    "title": "CAMEL GitHub Repository",
+    "url": "https://github.com/camel-ai/camel"
+  },
+  {
+    "title": "OWL GitHub Repository (camel-ai/owl)",
+    "url": "https://github.com/camel-ai/owl"
+  },
+  {
+    "title": "OWL arXiv Paper: Optimized Workforce Learning",
+    "url": "https://arxiv.org/abs/2505.23885"
+  },
+  {
+    "title": "mlx-lm GitHub Repository",
+    "url": "https://github.com/ml-explore/mlx-lm"
+  },
+  {
+    "title": "mlx-lm SERVER.md (OpenAI-compatible server documentation)",
+    "url": "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md"
+  },
+  {
+    "title": "Apple Silicon MLX LLM Inference Optimization Tutorial (Branch8)",
+    "url": "https://branch8.com/posts/apple-silicon-mlx-llm-inference-optimization-tutorial"
+  },
+  {
+    "title": "Tested local LLMs on M4 MacBook Pro (Reddit /r/ollama benchmark)",
+    "url": "https://www.reddit.com/r/ollama/comments/1j0by7r/tested_local_llms_on_a_maxed_out_m4_macbook_pro/"
+  },
+  {
+    "title": "Running local models on M4 with 24GB memory (Hacker News)",
+    "url": "https://news.ycombinator.com/item?id=48089091"
+  },
+  {
+    "title": "Local LLMs for development on MacBook 24GB (Reddit /r/LocalLLM)",
+    "url": "https://www.reddit.com/r/LocalLLM/comments/1ru6lq6/local_llms_for_development_on_macbook_24_gb_ram/"
+  },
+  {
+    "title": "Qwen3: Think Deeper, Act Faster (Official Qwen Blog)",
+    "url": "https://qwenlm.github.io/blog/qwen3/"
+  },
+  {
+    "title": "EconML Meta-Learners Documentation (T/S/X/DR-Learner)",
+    "url": "https://www.pywhy.org/EconML/spec/estimation/metalearners.html"
+  },
+  {
+    "title": "Meta-Learners: Measuring Treatment Effects with Causal ML (Towards AI)",
+    "url": "https://pub.towardsai.net/meta-learners-measuring-treatment-effects-with-causal-machine-learning-53047aed2cfb"
+  },
+  {
+    "title": "Friedkin-Johnsen Opinion Dynamics Model (Physics of Risk)",
+    "url": "https://rf.mokslasplius.lt/friedkin-johnsen-model/"
+  },
+  {
+    "title": "Bounded Confidence Models: Deffuant-Weisbuch and Hegselmann-Krause (ITP Frankfurt)",
+    "url": "https://itp.uni-frankfurt.de/~gros/StudentProjects/Applets_2014_OpinionDynamics/index.html"
+  },
+  {
+    "title": "A Bounded-Confidence Model of Opinion Dynamics (arXiv 2605.20418)",
+    "url": "https://arxiv.org/html/2605.20418v2"
+  },
+  {
+    "title": "Bayesian A/B Testing Expected Loss (Demetri Pananos Ph.D)",
+    "url": "https://dpananos.github.io/posts/2024-09-01-ab-length/"
+  },
+  {
+    "title": "Bayesian A/B Testing Expected Loss Analysis (Towards Data Science)",
+    "url": "https://towardsdatascience.com/how-to-analyse-a-b-experiments-using-bayesian-expected-loss-b959e21a77ce/"
+  },
+  {
+    "title": "tick: Python library for Hawkes processes (JMLR)",
+    "url": "https://jmlr.org/papers/volume18/17-381/17-381.pdf"
+  },
+  {
+    "title": "tick.hawkes module documentation",
+    "url": "https://x-datainitiative.github.io/tick/modules/hawkes.html"
+  },
+  {
+    "title": "stmorse/hawkes: Python class for Hawkes processes",
+    "url": "https://github.com/stmorse/hawkes"
+  },
+  {
+    "title": "HawkesPyLib (PyPI)",
+    "url": "https://pypi.org/project/HawkesPyLib/"
+  },
+  {
+    "title": "Python class for Hawkes processes (Scott Morse blog)",
+    "url": "https://stmorse.github.io/journal/Hawkes-python.html"
+  },
+  {
+    "title": "Reproducible machine learning with DVC + MLflow (SURF wiki)",
+    "url": "https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/35586110/Reproducible+machine+learning+with+DVC+mlflow"
+  },
+  {
+    "title": "Use MLflow and DVC for open-source reproducible ML (Towards Data Science)",
+    "url": "https://towardsdatascience.com/use-mlflow-and-dvc-for-open-source-reproducible-machine-learning-2ab8c0678a94/"
+  },
+  {
+    "title": "OASIS: Project Blog Post (CAMEL-AI.org)",
+    "url": "https://www.camel-ai.org/blogs/project-oasis-automation-or-simulation---the-biggest-potential-of-multi-agent-systems"
+  },
+  {
+    "title": "OASIS User Generation Visualization (GitHub examples)",
+    "url": "https://github.com/camel-ai/oasis/blob/main/examples/experiment/user_generation_visualization.md"
+  },
+  {
+    "title": "Opinion Dynamics with Local Interactions (IJCAI 2016)",
+    "url": "https://www.ijcai.org/Proceedings/16/Papers/047.pdf"
+  },
+  {
+    "title": "Bounded Confidence Revisited (JASSS)",
+    "url": "https://www.jasss.org/26/4/11/11.pdf"
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "mcpServers": {
+    "deep-research": {
+      "command": "uvx",
+      "args": ["deep-research-mcp"],
+      "env": {
+        "PERPLEXITY_API_KEY": "your-key-here",
+        "XAI_API_KEY": "your-key-here",
+        "DEEP_RESEARCH_TIMEOUT_SEC": "1800"
+      }
+    },
+    "batch-orchestrator": {
+      "command": "uvx",
+      "args": ["batch-orchestrator-mcp"],
+      "env": {
+        "PERPLEXITY_API_KEY": "your-key-here",
+        "XAI_API_KEY": "your-key-here",
+        "OPENAI_API_KEY": "your-key-here",
+        "ANTHROPIC_API_KEY": "your-key-here"
+      }
+    },
+    "context-forge": {
+      "command": "python",
+      "args": ["$META_UTILITIES_HOME/skills/context-forge/scripts/mcp_server_example.py"],
+      "env": {
+        "WEAVIATE_URL": "${WEAVIATE_URL:-http://localhost:8080}",
+        "WEAVIATE_API_KEY": "${WEAVIATE_API_KEY}",
+        "TURBOVEC_BIT_WIDTH": "4",
+        "COMPRESS_MAX_TOKENS": "4000",
+        "CONTEXT_HOME": "${CONTEXT_HOME:-$HOME/.context}"
+      }
+    },
+    "research-memory": {
+      "command": "uvx",
+      "args": ["research-memory"],
+      "env": {
+        "CONTEXT_HOME": "${CONTEXT_HOME:-$HOME/.context}",
+        "WEAVIATE_URL": "${WEAVIATE_URL}",
+        "WEAVIATE_API_KEY": "${WEAVIATE_API_KEY}"
+      }
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "@mendable/firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
+      }
+    }
+  }
+}

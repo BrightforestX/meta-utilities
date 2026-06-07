@@ -1,0 +1,55 @@
+# Canonical LinkML data model for SurrealDB-governed entities used by research-memory + ODRS.
+# odrs-agents/1 style versioning + schema_version.
+# Place under ontology/memory/ (parallel to agents/linkml_schema.yaml pattern).
+# Compiler/adapter (thin) will emit SurrealQL from this; validation gates before writes.
+
+id: https://meta-utilities.example/odrs/memory
+name: odrs-memory
+prefixes:
+  linkml: https://w3id.org/linkml/
+  odrs: https://meta-utilities.example/odrs/
+imports:
+  - linkml:types
+default_range: string
+
+classes:
+  MemoryItem:
+    description: "Durable memory item (PARA path, citations, vector ref, tags)."
+    attributes:
+      id:
+        identifier: true
+        required: true
+      para_path: { required: true }
+      content: { required: true }
+      citations: { multivalued: true }
+      tags: { multivalued: true }
+      vector_ref: { }
+      schema_version: { required: true }
+      created_at: { }
+
+  ScenarioTrace:
+    description: "ODRS scenario execution trace (period decisions, PDR attributions)."
+    attributes:
+      run_id: { required: true }
+      period: { required: true }
+      agent_decisions: { }
+      pdr_attributions: { multivalued: true }
+      live_business_context_ref: { }
+      schema_version: { required: true }
+
+  Attribution:
+    description: "PDR / policy-level cost attribution (FinOps decision impact)."
+    attributes:
+      policy_id: { required: true }
+      delta: { }
+      cost: { }
+      level: { }
+      schema_version: { required: true }
+
+  LiveBusinessContext:
+    description: "Live signals pulled via px-mcp (Composio/Arcade) with citations and timestamps; used to seed oteemo runs or augment reports."
+    attributes:
+      timestamp: { required: true }
+      citations: { multivalued: true, required: true }
+      signals: { }
+      schema_version: { required: true }

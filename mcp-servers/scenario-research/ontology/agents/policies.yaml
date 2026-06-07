@@ -1,0 +1,30 @@
+# Policies (routing, safety, escalation, cost) for agents (P2)
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+policies:
+  cost_control:
+    description: "Prefer local for bulk; escalate only high-leverage steps to frontier. Emit cost_report.json."
+    rules:
+      - "oasis bulk agents MUST use local endpoint"
+      - "planner/writer/math MAY use frontier with explicit justification in trace"
+      - "total estimated_cost_usd logged per run"
+
+  safety:
+    description: "Restrict harmful action space and content policies."
+    rules:
+      - "no MUTE in info_spread P0 scenarios"
+      - "no PII exfiltration in generated posts/comments"
+      - "scenario narratives must not target protected classes for abuse"
+
+  escalation:
+    description: "When to hand off from local to frontier or human."
+    rules:
+      - "if local model confidence < threshold or task requires deep reasoning -> frontier"
+      - "if repeated validation failures -> stop and report error in DTO"
+
+  routing:
+    description: "Default role->endpoint. Overridden by roles.yaml + models.yaml at runtime."
+    defaults:
+      population: local
+      workforce_thinkers: frontier

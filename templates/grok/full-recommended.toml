@@ -1,0 +1,65 @@
+# Full recommended Grok configuration for meta-utilities stack
+# Copy relevant parts into your .grok/config.toml or project .grok/config.toml
+
+[mcp_servers.deep-research]
+command = "uvx"
+args = ["deep-research-mcp"]
+env = { PERPLEXITY_API_KEY = "${PERPLEXITY_API_KEY}", XAI_API_KEY = "${XAI_API_KEY}" }
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+tool_timeouts = { deep_research = 1800 }
+
+[mcp_servers.batch-orchestrator]
+command = "uvx"
+args = ["batch-orchestrator-mcp"]
+env = {
+  PERPLEXITY_API_KEY = "${PERPLEXITY_API_KEY}",
+  XAI_API_KEY = "${XAI_API_KEY}",
+  OPENAI_API_KEY = "${OPENAI_API_KEY}",
+  ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
+}
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+tool_timeouts = { submit_batch = 3600, run_research_pipeline = 3600, collect_batch_results = 600 }
+
+# Context Forge + Weaviate+turbovec vector search + token compression (register for Grok Build CLI pipelines)
+# Enables /context-forge, semantic RAG with compressed vectors, compress tool in deep-research flows
+[mcp_servers.context-forge]
+command = "python"
+args = ["$META_UTILITIES_HOME/skills/context-forge/scripts/mcp_server_example.py"]
+env = {
+  WEAVIATE_URL = "${WEAVIATE_URL:-http://localhost:8080}",
+  WEAVIATE_API_KEY = "${WEAVIATE_API_KEY}",
+  TURBOVEC_BIT_WIDTH = "4",
+  COMPRESS_MAX_TOKENS = "4000",
+  CONTEXT_HOME = "${CONTEXT_HOME:-$HOME/.context}"
+}
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+tool_timeouts = { semantic_search = 60, search_knowledge_base = 90, compress_text = 30 }  # two-layer: client env + host
+
+# Firecrawl (Phase 0 portable CLI via scripts/install-firecrawl.sh + optional MCP for tool exposure in Grok)
+# Two-layer timeouts: export FIRECRAWL_TIMEOUT_SEC=300 (client); host tool_timeouts below.
+# Use npx form for the official MCP server (provides search/scrape/crawl tools); CLI used directly by skills.
+[mcp_servers.firecrawl]
+command = "npx"
+args = ["-y", "@mendable/firecrawl-mcp"]
+env = { FIRECRAWL_API_KEY = "${FIRECRAWL_API_KEY}" }
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+tool_timeouts = { search = 120, scrape = 180, crawl = 600, map = 120 }
+
+# research-memory (Phase 1 scaffold but pre-registered here for Phase 0 "out of box" defaults in full-recommended)
+# Uses local turbovec + PARA per plan; uvx research-memory after `uv tool install -e mcp-servers/research-memory`
+# tool_timeouts lists primary + alias (store_research_artifact) + list_artifacts for full coverage (alias calls same impl).
+[mcp_servers.research-memory]
+command = "uvx"
+args = ["research-memory"]
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+tool_timeouts = { store_artifact = 30, store_research_artifact = 30, search_prior_reports = 90, retrieve_by_citation_graph = 30, list_artifacts = 30 }

@@ -1,0 +1,22 @@
+# Combined Grok registration for Context Forge + Deep Research
+# Recommended starting point for new projects using meta-utilities
+
+[mcp_servers.deep-research]
+command = "uvx"
+args = ["deep-research-mcp"]
+env = { PERPLEXITY_API_KEY = "${PERPLEXITY_API_KEY}", XAI_API_KEY = "${XAI_API_KEY}" }
+enabled = true
+tool_timeouts = { deep_research = 1800 }
+
+[mcp_servers.batch-orchestrator]
+command = "uvx"
+args = ["batch-orchestrator-mcp"]
+env = {
+  PERPLEXITY_API_KEY = "${PERPLEXITY_API_KEY}",
+  XAI_API_KEY = "${XAI_API_KEY}",
+  OPENAI_API_KEY = "${OPENAI_API_KEY}"
+}
+enabled = true
+tool_timeouts = { submit_batch = 3600, run_research_pipeline = 3600 }
+
+# Note: Context Forge is primarily used as a skill rather than an MCP today.

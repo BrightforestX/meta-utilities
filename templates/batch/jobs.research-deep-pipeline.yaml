@@ -1,0 +1,68 @@
+version: 1
+
+# Example multi-stage deep research pipeline with memory hooks, program.md, Firecrawl grounding option,
+# critic/ratchet (wired in Phase 2), RAG via context-forge + research-memory.
+# Use: meta-batch validate this ; meta-batch submit ... --topic "..."
+# Leverages recent Weaviate+compress work + research-memory for recall/citation graphs.
+
+defaults:
+  provider: perplexity
+  reasoning_effort: high
+  mode: realtime
+  use_memory: true   # hooks to research-memory + context-forge RAG/compress
+  firecrawl_enabled: false  # set true to use Firecrawl for initial grounding/search
+
+output_dir: ./batch-results
+concurrency: 3
+
+program: file:./program.md  # persistent instructions (loaded by pipeline in 2.1)
+
+jobs:
+  - id: planner
+    type: inference
+    provider: openai
+    model: gpt-4o-mini
+    prompt: |
+      Triage and decompose the research query into 3-4 non-overlapping sub-queries.
+      Consider prior artifacts in research-memory if use_memory.
+      Output numbered list.
+
+  - id: parallel-deep
+    type: deep_research_pipeline
+    depth: comparative
+    max_subagents: 2
+    provider: perplexity
+    depends_on: [planner]
+    query: "meta-utilities deep research improvements 2026 and batch orchestrator verification gaps. Decompose and research subtopics including prior artifacts recall via RAG (gap-analysis.md, turbovec/Weaviate/context-forge compress work from prior, program.md support, ratchet in pipeline, live persist). Output sections with citations where possible."
+    # Dogfood run (2.3): self-contained query (no file ref) for exact cmd post-2.2 robustness; reduced subagents/depth + BATCH_DOGFOOD_STUB for feasible verification timing per plan notes; still exercises full ratchet/critic/program injection/persist + real apply_karpathy path. RAG via prompt + live research-memory in hook/persist job.
+
+  - id: firecrawl-ground
+    type: inference  # or custom firecrawl tool job
+    depends_on: [planner]
+    prompt: "If firecrawl_enabled, run firecrawl search for recent sources on the brief and summarize top 5."
+
+  - id: critic-ratchet
+    type: inference
+    provider: openai
+    model: gpt-4o-mini
+    depends_on: [parallel-deep]
+    prompt: |
+      Apply Karpathy ratchet + critic: keep only sections with verified citations and quality > prior.
+      Use research-memory retrieve_by_citation_graph for prior on same topic.
+      Output only the kept improved report parts. Gap detect.
+
+  - id: synth-with-rag
+    type: inference
+    provider: grok
+    depends_on: [parallel-deep, critic-ratchet]
+    prompt: |
+      Synthesize final report. Use context-forge compress on large inputs.
+      Recall from research-memory search_prior_reports for related meta-utilities work (turbovec etc).
+      Include citation graph summary. Executive + detailed + sources + open.
+
+  - id: persist-memory
+    type: inference
+    depends_on: [synth-with-rag]
+    prompt: |
+      Persist the final ratcheted report + citation graph to research-memory using store (or store_research_artifact alias) with tags: meta-utilities,deep-research,2026-06,ratcheted-report,from-pipeline-2.3 .
+      Include recall of priors (gap-analysis.md, turbovec work). Output the stored id and confirmation. (The pipeline hook also stores ratchet graph live via CLI.)

@@ -1,0 +1,17 @@
+{
+  "id": "a6c08cc430d5",
+  "stored_at": "2026-06-04T21:09:47.566719+00:00",
+  "title": "report",
+  "tags": [
+    "batch",
+    "persist",
+    "ratcheted-report",
+    "meta-utilities",
+    "2.3-dogfood",
+    "pipeline"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "VERDICT: KEEP the high cited section with gap-analysis recall and verified cites [1]; DROP vague.",
+  "summary": "VERDICT: KEEP the high cited section with gap-analysis recall and verified cites [1]; DROP vague."
+}

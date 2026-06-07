@@ -1,0 +1,64 @@
+# Minimal LinkML-aligned schema for ODRS agent ontology objects (P2 stub)
+# This is the source model from which JSON Schema + (future) Pydantic dataclasses can be generated.
+# Not executed in P0/P1; generator step is P2 follow-up.
+
+id: https://example.org/odrs/agents
+name: odrs_agents
+prefixes:
+  linkml: https://w3id.org/linkml/
+  odrs: https://example.org/odrs/
+
+imports:
+  - linkml:types
+
+classes:
+  AgentRole:
+    attributes:
+      name:
+        identifier: true
+        range: string
+      kind:
+        range: string
+      description:
+        range: string
+      model_endpoint:
+        range: string
+      tools:
+        range: string
+        multivalued: true
+      policies:
+        range: string
+        multivalued: true
+      population_template:
+        range: string
+        required: false
+
+  ToolSpec:
+    attributes:
+      name:
+        identifier: true
+      description:
+        range: string
+      actions:
+        range: string
+        multivalued: true
+
+  Policy:
+    attributes:
+      name:
+        identifier: true
+      description:
+        range: string
+      rules:
+        range: string
+        multivalued: true
+
+  PopulationTemplate:
+    attributes:
+      name:
+        identifier: true
+      description:
+        range: string
+      n:
+        range: integer
+        required: false

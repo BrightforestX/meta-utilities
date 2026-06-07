@@ -1,0 +1,39 @@
+# Allowed tool capabilities for governed agents (P2)
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+tools:
+  oasis_actions:
+    description: "The 11-action OASIS space restricted for the scenario."
+    actions:
+      - LIKE_POST
+      - DISLIKE_POST
+      - CREATE_POST
+      - CREATE_COMMENT
+      - LIKE_COMMENT
+      - DISLIKE_COMMENT
+      - SEARCH_POSTS
+      - TREND
+      - REFRESH
+      - DO_NOTHING
+      - FOLLOW
+      # MUTE omitted for safety in P0 scenarios
+
+  web_search:
+    description: "General web/arxiv search (frontier only)."
+  read_paper:
+    description: "Fetch and summarize paper content."
+  arxiv:
+    description: "arXiv search + abstract fetch."
+  scenario_templates:
+    description: "Access to scenario yaml templates for variant design."
+  math_fits:
+    description: "Invoke the P0 math modules (sir, hawkes, bounded_confidence, bayesian_ab) with typed IO."
+  report:
+    description: "Assemble markdown + embed figures + cost."
+  figures:
+    description: "Generate PNGs for cascades, polarization, uplift etc."
+  delegate:
+    description: "Coordinator only: dispatch subtask to named worker."
+  aggregate:
+    description: "Coordinator only: merge worker outputs under constraints."

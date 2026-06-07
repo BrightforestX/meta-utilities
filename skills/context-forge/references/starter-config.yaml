@@ -1,0 +1,32 @@
+# Context Forge - Minimal Starter Configuration
+# Copy this to .context/config.yaml in your project root (or ~/.context/config.yaml globally)
+
+# This is intentionally very small. Most power comes from behavior changes
+# (Smart Retrieval discipline) rather than heavy configuration.
+
+retrieval:
+  prefer_structural: true
+  max_symbol_tokens: 3000
+
+memory:
+  # Start by leveraging your existing para-memory-files setup if you have one.
+  # Later we will add a native "forge" backend.
+  backend: "para"          # or "forge" once implemented
+  auto_summarize: true
+
+compression:
+  enabled: true
+  default_level: "balanced"   # conservative | balanced | aggressive
+
+# Vector compression (for RAG / long-term knowledge)
+vector:
+  enabled: false              # Set to true when you're ready to add turbovec
+  default_engine: "turbovec"
+  bit_width: 4
+
+# Future: MCP and integration settings will go here
+integrations:
+  cursor:
+    prefer_mcp: true
+  claude_code:
+    prefer_mcp: true

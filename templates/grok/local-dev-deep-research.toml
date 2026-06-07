@@ -1,0 +1,11 @@
+# Local development registration for deep-research-mcp
+# Use this while actively editing the code in meta-utilities
+
+[mcp_servers.deep-research]
+command = "python"
+args = ["$META_UTILITIES_HOME/mcp-servers/deep-research/deep_research_mcp.py"]
+env = { PERPLEXITY_API_KEY = "${PERPLEXITY_API_KEY}", XAI_API_KEY = "${XAI_API_KEY}", DEEP_RESEARCH_TIMEOUT_SEC = "1800" }
+enabled = true
+tool_timeouts = { deep_research = 1800 }
+
+# Note: Replace $META_UTILITIES_HOME with the actual path or export it in your shell.

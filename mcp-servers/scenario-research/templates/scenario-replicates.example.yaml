@@ -1,0 +1,11 @@
+# Example batch manifest to drive ODRS replicates via existing batch-orchestrator (P5)
+# Submit with: meta-batch run this.yaml  (after registering batch-orchestrator + scenario-research)
+jobs:
+  - id: info-spread-reps
+    type: scenario_replicate
+    scenario: info_spread
+    agents: 200
+    steps: 30
+    reps: 5
+    seed_base: 42
+    # outputs pooled to reports/ and cost_report aggregate

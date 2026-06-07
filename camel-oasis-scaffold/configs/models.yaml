@@ -1,0 +1,33 @@
+# Model routing for the hybrid M4 setup.
+# Edit base_url / model names to match your local serve script and API keys.
+
+local:
+  # An OpenAI-compatible endpoint. mlx_lm.server defaults to 127.0.0.1:8080.
+  # Ollama defaults to 127.0.0.1:11434/v1.
+  platform: "openai_compatible"
+  base_url: "http://127.0.0.1:8080/v1"
+  api_key: "EMPTY"  # mlx_lm.server ignores this; Ollama also accepts anything
+  model: "mlx-community/Qwen2.5-7B-Instruct-4bit"
+  model_config:
+    temperature: 0.7
+    max_tokens: 1024
+    top_p: 0.9
+
+frontier:
+  # Routed to the Workforce planner + math analyst (where reasoning matters).
+  platform: "anthropic"          # or "openai"
+  model: "claude-sonnet-4-5"     # swap to your favorite
+  api_key_env: "ANTHROPIC_API_KEY"
+  model_config:
+    temperature: 0.3
+    max_tokens: 4096
+
+# Per-role overrides. Anything not listed falls back to `local`.
+roles:
+  oasis_agent:        local
+  scenario_designer:  frontier
+  literature_worker:  frontier
+  math_analyst:       frontier
+  report_writer:      frontier
+  coordinator:        frontier
+  planner:            frontier

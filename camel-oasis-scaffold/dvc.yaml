@@ -1,0 +1,16 @@
+# dvc.yaml for ODRS scenario reproducibility (P1 gap close)
+stages:
+  run_info_spread:
+    cmd: python -m src.cli run info_spread --agents 200 --steps 30
+    outs:
+      - data/info_spread.db
+  run_opinion:
+    cmd: python -m src.cli run opinion_dynamics --agents 200 --steps 30
+    outs:
+      - data/opinion_dynamics.db
+  analyze_info_spread:
+    cmd: python -m src.cli analyze info_spread
+    deps:
+      - data/info_spread.db
+    outs:
+      - reports/info_spread_metrics.json

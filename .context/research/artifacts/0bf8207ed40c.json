@@ -1,0 +1,17 @@
+{
+  "id": "0bf8207ed40c",
+  "stored_at": "2026-06-04T21:08:42.626990+00:00",
+  "title": "report",
+  "tags": [
+    "batch",
+    "persist",
+    "ratcheted-report",
+    "meta-utilities",
+    "2.3-dogfood",
+    "pipeline"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "Subtasks: 1. meta gap ratchet RAG. 2. turbovec compress. Include cites and recall of gap-analysis.md + plan.",
+  "summary": "Subtasks: 1. meta gap ratchet RAG. 2. turbovec compress. Include cites and recall of gap-analysis.md + plan."
+}

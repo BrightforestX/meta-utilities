@@ -1,0 +1,30 @@
+# Policies for oteemo leadership agents (P2)
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+policies:
+  # Oteemo-specific policies (derived from primary_accountabilities + ontology FinOps/governance emphasis)
+  axiom_min_progress:
+    description: "Raja-mandated: enforce minimum Axiom maturity at horizon end for strategic positioning (internal_platform leverage)."
+    rules:
+      - "final_axiom_maturity >= 0.35 or penalize objective heavily"
+      - "sustained invest_frac >= 0.15 in most periods unless bench crisis"
+  finops_cost_attribution:
+    description: "PolicyDecisionRecord-level attribution preferred (per ontology CostAttributionLevel=policy). Track internal invest cost, bench opportunity cost, policy delta on util."
+    rules:
+      - "every allocation or tier decision emits pdr-like record: policy_id, downstream_effect_on_util, attributed_cost"
+      - "aggregate into CostReport analog (repurposed for decision FinOps)"
+  delivery_util_target:
+    description: "Rod's target: keep client_delivery staffed fraction high (direct billable); balance with pipeline health and Axiom support."
+    rules:
+      - "period_util >= 0.60 preferred"
+      - "max acceptable avg_bench_frac <= 0.18"
+  platform_leverage:
+    description: "Arka: architecture and knowledge investments yield compounding efficiency and win-rate option value."
+    rules:
+      - "efficiency_mult and knowledge effects persist across periods"
+      - "internal_platform allocations count toward Axiom maturity"
+  cost_control:
+    description: "Global: log all decision FinOps; prefer policies that improve effective billable output per capacity unit."
+    rules:
+      - "emit attribution for every policy decision"

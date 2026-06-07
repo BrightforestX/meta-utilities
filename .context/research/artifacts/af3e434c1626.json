@@ -1,0 +1,17 @@
+{
+  "id": "af3e434c1626",
+  "stored_at": "2026-06-04T22:09:21.153015+00:00",
+  "title": "report",
+  "tags": [
+    "batch",
+    "ratchet",
+    "citations",
+    "meta-utilities",
+    "2.3-dogfood",
+    "live-rag"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "# Ratchet Citation Graph (Task 2.3 dogfood pipeline output)\nrun_id: 1ab216ab-62f4-46c5-822e-6eb47cb27330\n\n## Kept Section\n## High-Signal Verified Section with Prior RAG Recall (kept by ratchet)\nFrom prior work in gap-analysis.md and docs/superpowers/plans/2026-06-04-deep-research-enhancement.md: ratchet/critic + research-memory (PARA + turbovec/Weaviate) + context-forge compress delivered token wins (~20%+ on gap) and live recall of artifacts (e.g. ids f4974b10ddc3, 8eb3e8905198). Program.md support and submit alias enabled exact `meta-batch submit ... --topic \"meta-utilities deep research improvements 2026\"` post-2.2. See https://github.com/brightforest/meta-utilities [1] and internal citation graph from ratchet kept.\nResult: only verified improved sections retained (monotonic quality gate); citations present and checked.\n\n## Vague Low-Cite Dropped Section (example of what ratchet rejects)\nSome batch verification gaps were addressed but this claim lacks specific sources or measurable data from the run.\nMay reference plan but no url or [n] cite attached here.\n\n",
+  "summary": "# Ratchet Citation Graph (Task 2.3 dogfood pipeline output) run_id: 1ab216ab-62f4-46c5-822e-6eb47cb27330 ## Kept Section ## High-Signal Verified Section with Prior RAG Recall (kept by ratchet) From prior work in gap-analysis.md and docs/superpowers/plans/2026-06-04-deep-research-enhancement.md: ratchet/critic + research-memory (PARA + turbovec/Weaviate) + context-forge compress delivered token wins (~20%+ on gap) and live recall of artifacts (e.g. ids f4974b10ddc3, 8eb3e8905198). Program.md support and submit alias enabled exact `meta-batch submit ... --topic \"meta-utilities deep research improvements 2026\"` post-2.2. See https://github.com/brightforest/meta-utilities [1] and internal citation graph from ratchet kept. Result: only verified improved sections retained (monotonic quality gate..."
+}

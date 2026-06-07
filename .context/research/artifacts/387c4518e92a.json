@@ -1,0 +1,17 @@
+{
+  "id": "387c4518e92a",
+  "stored_at": "2026-06-04T21:08:08.700656+00:00",
+  "title": "report",
+  "tags": [
+    "batch",
+    "persist",
+    "ratcheted-report",
+    "meta-utilities",
+    "2.3-dogfood",
+    "pipeline"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "Produce sub reports with citations; include prior recall from gap-analysis.md and plan 2026; ratchet will keep only verified.",
+  "summary": "Produce sub reports with citations; include prior recall from gap-analysis.md and plan 2026; ratchet will keep only verified."
+}

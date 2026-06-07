@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "scenario-research": {
+      "command": "uvx",
+      "args": ["scenario-research-mcp"]
+    }
+  }
+}

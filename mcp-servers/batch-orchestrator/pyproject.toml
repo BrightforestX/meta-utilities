@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "batch-orchestrator-mcp"
+version = "0.1.0"
+description = "YAML-driven batch queue for deep research and inference with hybrid realtime/batch provider routing"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+  {name = "Clifford Dalson III"}
+]
+dependencies = [
+  "fastmcp>=3",
+  "openai>=1.0.0",
+  "pydantic>=2",
+  "pyyaml>=6",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+research = [
+  "turbovec",
+  "weaviate-client>=4",
+  "sentence-transformers>=2.2",
+  "tiktoken>=0.7",
+]  # for memory/ratchet RAG + metrics in pipelines; graceful fallbacks
+# firecrawl grounding via external CLI/MCP (see deep-research optional + scripts/install); no py dep here
+# research-memory separate (uvx after install -e its dir)
+
+[project.scripts]
+meta-batch = "batch_orchestrator.cli:main"
+batch-orchestrator-mcp = "batch_orchestrator.server:main"
+
+[project.urls]
+Homepage = "https://github.com/clifforddalsoniii/meta-utilities"
+Repository = "https://github.com/clifforddalsoniii/meta-utilities/tree/main/mcp-servers/batch-orchestrator"
+
+[tool.hatch.build.targets.wheel]
+packages = ["batch_orchestrator"]
+
+[dependency-groups]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

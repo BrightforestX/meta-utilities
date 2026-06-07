@@ -1,0 +1,51 @@
+# Governed CAMEL agent roles for ODRS (P2)
+# This is the source of truth for agent identities. Runtime CAMEL roles are compiled from this.
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+roles:
+  - name: oasis_agent
+    kind: population
+    description: "Identical bulk agents in OASIS social simulation (Reddit/Twitter-like)."
+    model_endpoint: local   # resolved via router + models.yaml
+    tools: ["oasis_actions"]  # reference to tools.yaml
+    population_template: standard_36  # ref to population_templates.yaml
+
+  - name: planner
+    kind: workforce
+    description: "CAMEL Workforce planner. Decomposes research question into sub-tasks."
+    model_endpoint: frontier
+    tools: ["web_search", "read_paper"]
+    policies: ["cost_control", "escalation"]
+
+  - name: scenario_designer
+    kind: workforce
+    description: "Designs scenario variants (narratives, seeds, population mixes)."
+    model_endpoint: frontier
+    tools: ["scenario_templates"]
+    policies: ["safety"]
+
+  - name: literature_worker
+    kind: workforce
+    description: "Gathers and summarizes literature/arxiv for context."
+    model_endpoint: frontier
+    tools: ["arxiv", "web_search"]
+
+  - name: math_analyst
+    kind: workforce
+    description: "Fits and interprets mathematical models (SIR, Hawkes, etc.) on simulation traces."
+    model_endpoint: frontier
+    tools: ["math_fits", "report"]
+
+  - name: report_writer
+    kind: workforce
+    description: "Synthesizes final report with figures, fits, cost, and citations."
+    model_endpoint: frontier
+    tools: ["report", "figures"]
+    policies: ["cost_control"]
+
+  - name: coordinator
+    kind: workforce
+    description: "CAMEL coordinator that orchestrates workers and aggregates results."
+    model_endpoint: frontier
+    tools: ["delegate", "aggregate"]

@@ -1,0 +1,17 @@
+{
+  "id": "0cf0fe4970a9",
+  "stored_at": "2026-06-04T20:41:18.944344+00:00",
+  "title": "report",
+  "tags": [
+    "weaviate",
+    "turbovec",
+    "phase0",
+    "2026-06-04"
+  ],
+  "citations": [],
+  "metadata": {
+    "note": "prior for deep dogfood"
+  },
+  "content": "docs/turbovec-integration.md",
+  "summary": "docs/turbovec-integration.md"
+}

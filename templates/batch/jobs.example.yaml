@@ -1,0 +1,48 @@
+version: 1
+
+defaults:
+  provider: perplexity
+  reasoning_effort: high
+  mode: realtime
+
+output_dir: ./batch-results
+concurrency: 4
+
+budget:
+  max_usd: 25
+
+jobs:
+  - id: market-research
+    type: deep_research
+    mode: realtime
+    provider: perplexity
+    query: >
+      Competitive landscape of agentic DevSecOps platforms in 2026,
+      focusing on policy-as-code, cost telemetry, and FedRAMP automation.
+
+  - id: summarize-notes
+    type: inference
+    mode: batch
+    provider: openai
+    model: gpt-4o
+    prompt: "Summarize the key themes from {{file:./notes/example.md}} into 5 bullets."
+
+  - id: synth
+    type: inference
+    mode: realtime
+    provider: grok
+    depends_on:
+      - market-research
+      - summarize-notes
+    prompt: >
+      Synthesize the market research report and the summary notes into
+      a one-page executive brief with 3 actionable recommendations.
+
+  - id: due-diligence
+    type: deep_research_pipeline
+    depth: deep
+    max_subagents: 5
+    provider: perplexity
+    query: >
+      Full due diligence on edge-AI inference startups: funding, technical
+      differentiation, go-to-market, and enterprise adoption in 2026.

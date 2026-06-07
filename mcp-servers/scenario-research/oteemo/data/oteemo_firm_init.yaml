@@ -1,0 +1,108 @@
+# Oteemo firm init state for billable/utilization scenario (ODRS governed snapshot)
+# Derived from oteemo.linkml.yaml + oteemo-instances.yaml (read at creation time using absolute paths per task).
+# Runtime: this file is packaged relative; no absolute Oteemo paths here.
+# For refresh from source ontology: set OTEEMO_ONTOLOGY_SRC=/abs/path/to/oteemo-instances.yaml and run the (future) ingest helper.
+schema_version: "odrs-oteemo-firm/1"
+version: "0.1.0"
+source_note: "Snapshot from ontology v2.4 instances for billable-max simulation. Faithful to DeliveryContext, EngagementType, LeadershipRole primary_accountabilities, FederalProgram, AxiomPlatform internal, AIFinOps, ContractorContribution (Clifford)."
+
+leadership:
+  - id: raja_gudepu
+    name: "Raja Gudepu"
+    title: "Founder & CEO"
+    engagement_type: fte
+    primary_accountability: "Overall strategy; explicit owner of AI FinOps and prompt intelligence mandate within Axiom (internal_platform)"
+    levers:
+      - axiom_invest_frac  # % capacity to internal Axiom R&D (long-term leverage vs current billable drag)
+      - finops_policy      # prompt intelligence, model tier routing, cost attribution (PolicyDecisionRecord style)
+      - bid_threshold      # risk appetite for go/no-go on pipeline
+  - id: arkaprava_chaudhuri
+    name: "Arkaprava Chaudhuri"
+    title: "VP, Technology"
+    engagement_type: fte
+    primary_accountability: "Platform architecture, gRPC orchestrator, A2A bus, Agent SDK, GraphRAG/Taxonomy (drives efficiency/productivity of delivery + Axiom maturity)"
+    levers:
+      - arch_invest_frac   # internal tech debt / platform leverage
+      - efficiency_mult    # effect of arch decisions on delivery productivity
+      - knowledge_boost    # GraphRAG / corpus impact on win rate (future)
+  - id: roderick_kelly
+    name: "Roderick Kelly"
+    title: "Head of Delivery Operations, Federal"
+    engagement_type: fte
+    primary_accountability: "Federal program delivery, shaping, and execution (Navy PEO IWS class programs)"
+    levers:
+      - client_target_util # target staffed on client_delivery
+      - bid_aggressiveness # willingness to pursue / shape opportunities
+      - engagement_mix     # fte vs contractor vs sub for delivery
+  - id: clifford_dalson
+    name: "Clifford Dalson"
+    title: "Contractor - Axiom Platform & AI FinOps"
+    engagement_type: contractor
+    primary_accountability: "Axiom Platform & AI FinOps (fixed to internal_platform; contributes to maturity + FinOps efficiency)"
+    fixed_allocation: internal_platform  # per instances + ContractorContribution
+    contribution: "Policy-attributed cost telemetry, ontology, town hall visibility, scope expansion on FinOps/PDR"
+
+# Initial capacity (synthetic but realistic for small-horizon demo; fte-equivalents)
+capacity:
+  total_fte_equiv: 25.0
+  fte_count: 18
+  contractor_count: 6   # incl. Clifford
+  sub_count: 1
+  # initial split (will be re-allocated by policy each period)
+  initial_client_delivery_frac: 0.60
+  initial_axiom_internal_frac: 0.25
+  initial_bench_frac: 0.15
+
+# Axiom (internal_platform initiative, sponsor Raja)
+axiom:
+  name: "AXIOM"
+  delivery_context: internal_platform
+  sponsor: raja_gudepu
+  initial_maturity: 0.15  # 0-1 scale; builds with sustained internal allocation + contractor FinOps contrib
+  maturity_per_invest: 0.04  # per period per 0.1 frac invested (light model)
+  clifford_boost: 0.015     # extra per period from fixed contractor on FinOps
+
+# Federal programs / pipeline (generic per ontology, no fabricated claims)
+federal_programs:
+  - id: peo_iws_stub
+    name: "PEO IWS-class Federal AI Delivery"
+    program_type: peo_iws
+    contract_vehicle: seaport_nxg
+    base_billable_potential_hours: 4800  # per win, over engagement
+    base_win_prob: 0.35
+    duration_periods: 6
+    related_initiatives: [axiom]
+    stakeholders: [roderick_kelly]
+  - id: platform_one_stub
+    name: "Platform One / DoD DevSecOps"
+    program_type: platform_one
+    contract_vehicle: gsa_schedule
+    base_billable_potential_hours: 3200
+    base_win_prob: 0.28
+    duration_periods: 4
+    related_initiatives: [axiom]
+
+# FinOps / policy knobs (repurpose CostAttributionLevel, PromptComplexity, ModelTier, PolicyDecisionRecord)
+finops:
+  default_model_tier: balanced
+  high_complexity_rule: frontier
+  cost_attribution: policy   # PolicyDecisionRecord level preferred per ontology
+  prompt_intel_rules:
+    - complexity: high
+      sensitive: true
+      preferred: frontier
+  # Effect on sim: "good" FinOps policy reduces waste, boosts effective productivity 5-10%
+
+# Constraints for optimization (from leadership accountabilities + risk)
+constraints:
+  min_axiom_maturity_end: 0.35   # strategic positioning for Raja
+  max_avg_bench_frac: 0.18
+  min_delivery_capacity_signal: 0.55  # for Rod win prob floor
+  horizon_periods: 12
+
+# Engagement / delivery context emphasis
+delivery_contexts:
+  internal_platform: "Axiom R&D / non-billable investment (leverage, option value)"
+  client_delivery: "Billable federal program work (revenue now)"
+
+# Replicate / batch note: use templates/scenario-replicates.example.yaml adapted for oteemo seeds

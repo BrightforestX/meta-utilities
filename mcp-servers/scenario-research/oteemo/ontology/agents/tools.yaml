@@ -1,0 +1,30 @@
+# Allowed tool capabilities for oteemo governed leadership agents (P2)
+schema_version: "odrs-agents/1"
+version: "0.1.0"
+
+tools:
+  # Oteemo billable-max levers (governed; map to simulator policy params)
+  axiom_invest_lever:
+    description: "Raja's tool: set fraction of firm capacity allocated to Axiom internal_platform (builds maturity/option value, current util drag)."
+  finops_policy:
+    description: "Raja + Clifford: select model tier / prompt complexity routing rules (affects effective productivity via waste reduction; emits attribution like PolicyDecisionRecord)."
+  bid_go_decision:
+    description: "Leadership bid/go on federal program opportunities (influences pipeline win events)."
+  risk_control:
+    description: "Thresholds on bench, cashflow proxy, min delivery signal."
+  arch_invest_lever:
+    description: "Arka: internal investment in platform architecture (efficiency, A2A/GraphRAG effects)."
+  efficiency_policy:
+    description: "Arka: policy that multiplies delivery productivity based on architecture maturity."
+  knowledge_boost:
+    description: "Arka: corpus/GraphRAG contribution to future win probability."
+  client_alloc_lever:
+    description: "Rod: direct control or target for client_delivery allocation (maximizes immediate billable)."
+  bid_aggressiveness:
+    description: "Rod: multiplier on win probability / pursuit of opportunities."
+  engagement_mix_policy:
+    description: "Rod: fte/contractor/sub mix for new staffed work (affects cost structure and flexibility)."
+  finops_contrib:
+    description: "Clifford (contractor): fixed contribution to FinOps telemetry and Axiom maturity on internal_platform."
+  pdr_attribution:
+    description: "PolicyDecisionRecord-style attribution of decision costs/impacts (internal investment cost, opportunity cost of bench, util delta)."

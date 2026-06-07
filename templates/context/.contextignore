@@ -1,0 +1,15 @@
+# Files and directories Context Forge should generally ignore for retrieval
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+.env
+.env.*
+*.min.js
+*.min.css
+coverage/
+target/
+.venv/
