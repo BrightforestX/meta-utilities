@@ -104,8 +104,12 @@ Step 1 (implemented): LinkML memory schema compilation to SurrealQL:
 Step 2 (implemented): write-path adapter for scenario artifacts:
 - `ScenarioSurrealWriter` + `persist_run_artifacts`
 - CLI and MCP `run` paths call this after scenario execution
-- if `SURREAL_URL` is healthy: applies schema and writes records
+- if `SURREAL_URL` is healthy: runs additive schema reconcile and writes records
 - fallback: writes local payload JSON to `.context/scenario-surreal-writes/` (or `SCENARIO_SURREAL_FALLBACK_DIR`)
+- writes are deterministic/idempotent via explicit record IDs + `UPSERT`:
+  - `ScenarioTrace` keyed by `run_id + period`
+  - `Attribution` keyed by policy attribution key
+  - `LiveBusinessContext` keyed by `trace_id + scenario`
 
 Surreal envs:
 - `SURREAL_URL`
@@ -113,6 +117,7 @@ Surreal envs:
 - `SURREAL_DB` (default `memory`)
 - optional auth: `SURREAL_USER`, `SURREAL_PASS`
 - optional timeout: `SURREAL_TIMEOUT_SEC`
+- optional schema reconcile toggle: `SCENARIO_SURREAL_SCHEMA_RECONCILE` (default `true`)
 
 ## Observability (LangSmith + local lineage ledger)
 

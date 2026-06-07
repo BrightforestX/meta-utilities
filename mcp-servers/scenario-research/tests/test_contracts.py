@@ -688,6 +688,9 @@ def test_scenario_surreal_writer_uses_surreal_when_healthy(tmp_path):
             self.calls.append(sql)
             return {"ok": True}
 
+        def inspect_schema(self):
+            return {"tables": {}}
+
     fake = FakeSurreal()
     writer = ScenarioSurrealWriter(
         surreal=fake,  # type: ignore[arg-type]
@@ -698,5 +701,80 @@ def test_scenario_surreal_writer_uses_surreal_when_healthy(tmp_path):
     assert out["records_written"] >= 1
     assert len(fake.calls) >= 2  # schema + write
     assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace" in fake.calls[0]
-    assert "CREATE ScenarioTrace CONTENT" in fake.calls[1]
+    assert "UPSERT ScenarioTrace:" in fake.calls[1]
+
+
+def test_scenario_surreal_writer_upsert_ids_are_deterministic(tmp_path):
+    import json
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "pdr_attributions": [
+                        {"period": 1, "delta_util": 0.02, "invest_cost": 10.0, "attribution_level": "policy"}
+                    ]
+                }
+            }
+        )
+    )
+    run = ScenarioRun(
+        run_id="r-idempotent",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"raja": {"axiom_invest_frac": 0.22}}},
+    )
+
+    class FakeSurreal:
+        def __init__(self):
+            self.calls = []
+
+        def is_healthy(self):
+            return True
+
+        def execute_sql(self, sql: str):
+            self.calls.append(sql)
+            return {"ok": True}
+
+        def inspect_schema(self):
+            return {"tables": {}}
+
+    fake = FakeSurreal()
+    writer = ScenarioSurrealWriter(surreal=fake, fallback_dir=tmp_path / "surreal-fallback")  # type: ignore[arg-type]
+
+    first = writer.store_scenario_run(run, trace_id="trace-1", ontology_ref="agents")
+    second = writer.store_scenario_run(run, trace_id="trace-1", ontology_ref="agents")
+
+    assert first["backend"] == "surreal"
+    assert second["backend"] == "surreal"
+    # calls[1] and calls[3] are the write statements (calls[0]/[2] are schema reconcile SQL)
+    assert "UPSERT ScenarioTrace:" in fake.calls[1]
+    assert fake.calls[1] == fake.calls[3], "Repeated writes for same run must be deterministic and idempotent"
+
+
+def test_schema_reconcile_plan_adds_only_missing_entities():
+    from pathlib import Path
+    from scenario_research.linkml_surreal import plan_schema_reconcile
+
+    linkml = Path(__file__).resolve().parents[1] / "ontology" / "memory" / "linkml_data_model.yaml"
+    existing = {
+        "tables": {
+            "MemoryItem": {
+                "fields": {"id": {"type": "string"}, "content": {"type": "string"}},
+                "indexes": {"MemoryItem_id_uniq": {}},
+            }
+        }
+    }
+    plan = plan_schema_reconcile(linkml, existing_schema=existing, namespace="odrs", database="memory")
+    assert plan["has_changes"] is True
+    assert "ScenarioTrace" in plan["missing"]["tables"]
+    assert "Attribution" in plan["missing"]["tables"]
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace SCHEMAFULL;" in plan["sql"]
+    assert "DEFINE TABLE IF NOT EXISTS MemoryItem SCHEMAFULL;" not in plan["sql"]
 
