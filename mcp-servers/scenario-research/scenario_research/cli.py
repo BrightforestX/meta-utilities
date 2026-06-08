@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import __version__
 from .router import resolve_endpoint
-from .scaffold_adapter import execute_scenario, get_scaffold_root
+from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario, get_scaffold_root
 
 app = typer.Typer(help="ODRS scenario-research (extends camel-oasis-scaffold)")
 
@@ -65,21 +65,20 @@ def multi_run(
         output_dir = root / "data" / "camel_sim_results"
 
     from src.camel_sim.config.scenarios import load_scenario_configs  # type: ignore
-    from src.camel_sim.results.collector import write_results  # type: ignore
-    from src.camel_sim.simulation.runner import run_scenarios  # type: ignore
 
     configs = load_scenario_configs(scenario_file)
-    results = run_scenarios(configs, execution_mode=execution_mode, parallel=parallel)
-    artifacts = write_results(
-        results,
-        output_dir,
+    payload = execute_multi_scenario_configs(
+        [cfg.model_dump() for cfg in configs],
+        execution_mode=execution_mode,
+        parallel=parallel,
+        output_dir=output_dir,
         output_format=output_format,  # type: ignore[arg-type]
     )
     print(
         {
-            "scenarios": len(results),
-            "execution_mode": execution_mode,
-            "artifacts": artifacts,
+            "scenarios": payload["scenarios"],
+            "execution_mode": payload["execution_mode"],
+            "artifacts": payload["artifacts"],
         }
     )
 

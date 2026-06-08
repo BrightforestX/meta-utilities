@@ -4,6 +4,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable
 
+from ..config.models import default_server_urls
 from ..config.scenarios import AgentDefinition, ScenarioConfig
 from ..inference.model_router import get_camel_model
 from .actions import make_action_functions, make_action_toolkit
@@ -31,7 +32,7 @@ def run_scenario(
         raise ValueError("execution_mode must be 'local' or 'camel'")
 
     if execution_mode == "camel":
-        _run_with_camel_agents(scenario, state, server_urls or {})
+        _run_with_camel_agents(scenario, state, server_urls or default_server_urls())
     else:
         _run_with_scripted_agents(scenario, state)
 

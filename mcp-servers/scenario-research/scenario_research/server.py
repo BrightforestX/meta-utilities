@@ -22,7 +22,7 @@ from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
 from .router import resolve_endpoint, get_model_for_role
-from .scaffold_adapter import execute_scenario, get_scaffold_root
+from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario
 from .timeouts import get_timeout_seconds
 from .validation import validate_agent_yaml_text, validate_before_run
 
@@ -107,18 +107,15 @@ async def run_multi_scenario(
     uses the scaffold's model routing and should be paired with configured model
     backends or Modal/SGLang endpoints.
     """
-    get_scaffold_root()
-    from src.camel_sim.simulation.runner import run_scenarios  # type: ignore
-
-    results = run_scenarios(
+    payload = execute_multi_scenario_configs(
         scenario_configs,
         execution_mode=execution_mode,
         parallel=parallel,
     )
     return {
-        "scenarios": len(results),
-        "execution_mode": execution_mode,
-        "results": results,
+        "scenarios": payload["scenarios"],
+        "execution_mode": payload["execution_mode"],
+        "results": payload["results"],
     }
 
 

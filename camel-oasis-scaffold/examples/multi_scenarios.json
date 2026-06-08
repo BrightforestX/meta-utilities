@@ -52,5 +52,55 @@
         "persona": "You cite or challenge findings based on evidence quality."
       }
     ]
+  },
+  {
+    "id": "scheduling_001",
+    "name": "Cross-functional launch schedule",
+    "description": "A scheduler coordinates a launch planning meeting",
+    "max_ticks": 2,
+    "parameters": {
+      "time_slot": "2026-06-15T15:00:00Z",
+      "agenda": "Finalize launch risks and owners",
+      "participants": ["scheduler_1", "ops_1"]
+    },
+    "agents": [
+      {
+        "id": "scheduler_1",
+        "role": "scheduler",
+        "domain": "scheduling",
+        "persona": "You protect calendars and resolve planning conflicts."
+      },
+      {
+        "id": "ops_1",
+        "role": "operations lead",
+        "domain": "scheduling",
+        "persona": "You need a confirmed time for launch coordination."
+      }
+    ]
+  },
+  {
+    "id": "social_001",
+    "name": "Coalition formation discussion",
+    "description": "Agents exchange messages and form a coalition around a shared goal",
+    "max_ticks": 3,
+    "termination_condition": "coalition_formed",
+    "parameters": {
+      "message": "Can we coordinate on the shared rollout plan?",
+      "coalition_purpose": "Coordinate rollout dependencies"
+    },
+    "agents": [
+      {
+        "id": "advocate_1",
+        "role": "advocate",
+        "domain": "social",
+        "persona": "You build support for coordinated action."
+      },
+      {
+        "id": "stakeholder_1",
+        "role": "stakeholder",
+        "domain": "social",
+        "persona": "You join coalitions when the purpose is clear."
+      }
+    ]
   }
 ]

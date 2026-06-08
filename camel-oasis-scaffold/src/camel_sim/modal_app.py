@@ -5,6 +5,7 @@ Run with:
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -32,9 +33,13 @@ if modal is not None:
         timeout=900,
         retries=modal.Retries(max_retries=2, backoff_coefficient=2.0),
     )
-    def run_scenario_remote(config: dict[str, Any], server_urls: dict[str, str]) -> dict[str, Any]:
+    def run_scenario_remote(
+        config: dict[str, Any],
+        server_urls: dict[str, str],
+        execution_mode: str = "local",
+    ) -> dict[str, Any]:
         """Run one scenario inside Modal CPU workers."""
-        return run_scenario(config, server_urls=server_urls, execution_mode="camel")
+        return run_scenario(config, server_urls=server_urls, execution_mode=execution_mode)
 
     @app.function(volumes={"/results": _results_vol})
     def write_results_remote(
@@ -56,15 +61,28 @@ if modal is not None:
     def main(
         scenario_file: str = "examples/multi_scenarios.json",
         output_format: str = "parquet",
+        execution_mode: str = "local",
+        server_urls_json: str = "",
     ) -> None:
         scenario_configs = [cfg.model_dump() for cfg in load_scenario_configs(Path(scenario_file))]
-        server_urls = default_server_urls()
+        if execution_mode == "camel" and not server_urls_json:
+            raise ValueError(
+                "Modal CAMEL mode requires server_urls_json with reachable SGLang /v1 URLs. "
+                "Do not use localhost URLs from separate CPU workers."
+            )
+        server_urls = json.loads(server_urls_json) if server_urls_json else default_server_urls()
         print(f"Dispatching {len(scenario_configs)} scenarios to Modal...")
         start = time.time()
         results = list(
             run_scenario_remote.map(
                 scenario_configs,
-                kwargs=[{"server_urls": server_urls}] * len(scenario_configs),
+                kwargs=[
+                    {
+                        "server_urls": server_urls,
+                        "execution_mode": execution_mode,
+                    }
+                ]
+                * len(scenario_configs),
             )
         )
         elapsed = time.time() - start
