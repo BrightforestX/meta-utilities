@@ -6,8 +6,6 @@ and basic smoke (version) passes without requiring full scaffold wiring (see p0-
 """
 from __future__ import annotations
 
-import sys
-
 import typer
 from rich import print
 
@@ -15,7 +13,6 @@ import asyncio
 from pathlib import Path
 
 from . import __version__
-from .models import ScenarioRun
 from .router import resolve_endpoint
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 

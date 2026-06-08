@@ -8,14 +8,10 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import typer
 from rich import print
-from camel.tasks import Task
-
-from src.analysis.metrics import cascade_report
 
 app = typer.Typer(help="OASIS deep-research scaffold CLI")
 
@@ -46,6 +42,8 @@ def run(
 @app.command()
 def analyze(scenario: str, db: Path = typer.Option(None, help="Path to OASIS .db")):
     """Run the math-model fits against a scenario's DB."""
+    from src.analysis.metrics import cascade_report
+
     if db is None:
         db = DATA_DIR / f"{scenario}.db"
     if not db.exists():
@@ -57,7 +55,9 @@ def analyze(scenario: str, db: Path = typer.Option(None, help="Path to OASIS .db
 @app.command()
 def ask(question: str):
     """End-to-end auto-research: planner → workers → report."""
+    from camel.tasks import Task
     from src.auto_research.workforce import build_workforce
+
     wf = build_workforce()
     task = Task(content=question, id="user_question")
     result = wf.process_task(task)
