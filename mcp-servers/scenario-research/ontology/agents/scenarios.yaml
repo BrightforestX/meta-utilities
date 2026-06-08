@@ -1,0 +1,112 @@
+schema_version: "odrs-scenarios/1"
+version: "0.1.0"
+
+scenarios:
+  info_spread:
+    type: social_diffusion
+    description: "Information spread and cascade behavior on the OASIS action graph."
+    execution_risk_default: low
+    parameters:
+      n_steps:
+        type: integer
+        description: "Number of simulation periods."
+        required: false
+        default: 10
+        minimum: 1
+        maximum: 500
+      n_agents:
+        type: integer
+        description: "Advisory population size for run planning and reporting."
+        required: false
+        default: 50
+        minimum: 10
+        maximum: 5000
+      seed:
+        type: integer
+        description: "Deterministic seed for reproducibility."
+        required: false
+
+  opinion_dynamics:
+    type: social_opinion
+    description: "Polarization and opinion evolution under bounded-confidence interactions."
+    execution_risk_default: low
+    parameters:
+      n_steps:
+        type: integer
+        required: false
+        default: 10
+        minimum: 1
+        maximum: 500
+      n_agents:
+        type: integer
+        required: false
+        default: 50
+        minimum: 10
+        maximum: 5000
+      seed:
+        type: integer
+        required: false
+
+  marketing_ab:
+    type: controlled_experiment
+    description: "A/B style intervention modeling with engagement and conversion outcomes."
+    execution_risk_default: low
+    parameters:
+      n_steps:
+        type: integer
+        required: false
+        default: 10
+        minimum: 1
+        maximum: 500
+      n_agents:
+        type: integer
+        required: false
+        default: 50
+        minimum: 10
+        maximum: 5000
+      seed:
+        type: integer
+        required: false
+      holdout_ratio:
+        type: number
+        required: false
+        default: 0.2
+        minimum: 0.0
+        maximum: 0.5
+
+  oteemo_billable:
+    type: business_policy_optimization
+    description: "Leadership policy scenario for billable optimization and maturity trade-offs."
+    execution_risk_default: medium
+    parameters:
+      n_steps:
+        type: integer
+        required: false
+        default: 12
+        minimum: 1
+        maximum: 60
+      n_agents:
+        type: integer
+        required: false
+        default: 4
+        minimum: 1
+        maximum: 16
+      seed:
+        type: integer
+        required: false
+      optimize:
+        type: boolean
+        required: false
+        default: false
+      use_live_context:
+        type: boolean
+        required: false
+        default: false
+      objective:
+        type: enum
+        required: false
+        default: expected_billable_hours
+        enum:
+          - expected_billable_hours
+          - risk_adjusted_billable
+          - maturity_constrained_billable

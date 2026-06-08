@@ -11,4 +11,10 @@ See models.CostReport for the frozen P0 shape:
 
 The split local/API is emitted by the ask/run paths (hybrid router + workforce).
 
+Local model identifiers now include backend provider and model, e.g.:
+- `local:mlx:mlx-qwen`
+- `local:ollama:llama3.1:8b`
+- `local:lmstudio:qwen2.5-7b-instruct`
+- `local:turnover:turnover-local-14b`
+
 AC6 requires the split and dollar estimate.

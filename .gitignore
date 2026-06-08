@@ -83,6 +83,7 @@ mcp-servers/scenario-research/oteemo/reports/
 **/traces/
 **/reports/*.md
 **/reports/*.json
+mcp-servers/scenario-research/.context/
 
 # Keep committed reference data
 !mcp-servers/scenario-research/oteemo/data/oteemo_firm_init.yaml

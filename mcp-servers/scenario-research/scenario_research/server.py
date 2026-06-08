@@ -23,7 +23,12 @@ from typing import Any
 from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
-from .router import resolve_endpoint, get_model_for_role
+from .analytics import estimate_cost_report, fit_models_from_trace, load_trace_payload
+from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts, query_run_attributions
+from .observability import traced
+from .optimization.replay import replay_policy as replay_policy_robustness
+from .research_pipeline import build_research_report
+from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
 from .scaffold_adapter import execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
@@ -47,6 +52,7 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
+_RUN_CACHE: dict[str, ScenarioRun] = {}
 
 mcp = FastMCP(
     name="scenario-research",
@@ -77,6 +83,7 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
             "oasis_agent": resolve_endpoint("oasis_agent"),
             "planner": resolve_endpoint("planner"),
             "model_oasis": get_model_for_role("oasis_agent"),
+            "local_inference": get_local_inference_config(),
         },
         "contracts": ["ScenarioRun", "ModelFitResult", "CostReport", "ResearchReport", "OntologyChunk", "LinkMLClass"],
         "ontology": {
@@ -94,9 +101,10 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
 @mcp.tool()
 async def run_scenario(
     scenario: str,
-    n_agents: int = 50,
+    n_agents: int | None = None,
     n_steps: int = 10,
     seed: int | None = 42,
+    ontology: str | None = None,
     ctx: Context | None = None,
 ) -> ScenarioRun:
     """Run a governed scenario (delegates to camel-oasis-scaffold for social scenarios; oteemo_billable is self-contained local using governed leadership roles + discrete firm sim).
@@ -105,35 +113,191 @@ async def run_scenario(
     The MCP surface stays thin. oteemo_billable uses ontology-derived LeadershipRoles (Raja FinOps, Arka arch, Rod delivery) as distinct decision agents.
     Returns a populated ScenarioRun (status, db_path, error if any).
     """
-    # P3: block on invalid governed yaml/config before any scaffold work
-    validate_before_run(scenario, seed=seed)
-
-    # Note: n_agents is advisory here; the scaffold profiles determine population size.
-    # Real enforcement / population_templates come in P2 ontology layer.
-    result = await execute_scenario(
-        scenario,
-        n_steps=n_steps,
-        seed=seed,
+    trace = traced(
+        name="scenario_research.mcp.run_scenario",
+        inputs={
+            "scenario": scenario,
+            "n_agents": n_agents,
+            "n_steps": n_steps,
+            "seed": seed,
+            "ontology": ontology,
+        },
+        metadata={"surface": "mcp"},
     )
-    return result
+    try:
+        # P3: block on invalid governed yaml/config before any scaffold work
+        validate_before_run(
+            scenario,
+            seed=seed,
+            n_steps=n_steps,
+            n_agents=n_agents,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="validate_before_run",
+            inputs={
+                "scenario": scenario,
+                "seed": seed,
+                "n_steps": n_steps,
+                "n_agents": n_agents,
+                "ontology_ref": ontology,
+            },
+            outputs={"valid": True},
+            reasoning_summary="Validated governed inputs before invoking scenario runtime.",
+        )
+
+        # Note: n_agents is advisory here; the scaffold profiles determine population size.
+        # Real enforcement / population_templates come in P2 ontology layer.
+        result = await execute_scenario(
+            scenario,
+            n_steps=n_steps,
+            seed=seed,
+        )
+        trace.record_step(
+            name="execute_scenario",
+            inputs={"scenario": scenario, "n_steps": n_steps, "seed": seed},
+            outputs={"run_id": result.run_id, "status": result.status},
+            reasoning_summary="Ran scenario through local adapter/scaffold extension path.",
+        )
+        surreal_write = persist_run_artifacts(
+            result,
+            trace_id=trace.trace_id,
+            ontology_ref=ontology,
+        )
+        trace.record_step(
+            name="persist_run_artifacts",
+            inputs={"run_id": result.run_id, "trace_id": trace.trace_id, "ontology_ref": ontology},
+            outputs={
+                "backend": surreal_write.get("backend"),
+                "records_written": surreal_write.get("records_written"),
+            },
+            reasoning_summary="Persisted structured scenario artifacts to Surreal when healthy, else local fallback.",
+            metadata={"surreal_write": surreal_write},
+        )
+        if surreal_write.get("fallback_path"):
+            trace.record_artifact(
+                path=str(surreal_write["fallback_path"]),
+                kind="surreal_fallback_payload",
+                created_by_step="persist_run_artifacts",
+                metadata={"run_id": result.run_id},
+            )
+        trace.record_artifacts_from_run(result, created_by_step="execute_scenario")
+        trace.finalize(
+            outputs={"run_id": result.run_id, "status": result.status, "scenario": result.scenario},
+            error=result.error,
+        )
+        trace.attach_to_run(result)
+        _RUN_CACHE[result.run_id] = result
+        return result
+    except Exception as exc:
+        trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
+        raise
 
 
 @mcp.tool()
 async def ask(question: str, seed: int | None = 42, ctx: Context | None = None) -> ResearchReport:
-    """(P4 flow) End-to-end ask delegating to scaffold workforce when available.
-
-    Returns a ResearchReport DTO. In full env this will populate report_path, fits, cost_report.
-    """
-    # For wiring completeness we return a shaped report; real call to scaffold.ask would populate.
-    # (The scaffold cli.ask does the workforce; we keep surface here without duplicating logic.)
-    from datetime import datetime, timezone
-    rid = f"ask-{abs(hash(question)) % 10**8}"
-    return ResearchReport(
-        report_id=rid,
+    """End-to-end ask that produces report artifact, fits, costs, and scenario runs."""
+    trace = traced(
+        name="scenario_research.mcp.ask",
+        inputs={"question": question, "seed": seed},
+        metadata={"surface": "mcp"},
+    )
+    report, meta = await build_research_report(
         question=question,
-        created_at=datetime.now(timezone.utc).isoformat(),
         seed=seed,
-        cost_report=CostReport(run_id=rid),
+        trace_id=trace.trace_id,
+    )
+    trace.record_step(
+        name="build_research_report",
+        inputs={"question": question, "seed": seed},
+        outputs={
+            "report_id": report.report_id,
+            "report_path": report.report_path,
+            "scenario_runs": [r.run_id for r in report.scenario_runs],
+            "fits": [f.model for f in report.fits],
+        },
+        reasoning_summary="Built full research report pipeline with run, fits, cost telemetry, and persisted artifacts.",
+        metadata={"pipeline_meta": meta},
+    )
+    if report.report_path:
+        trace.record_artifact(
+            path=report.report_path,
+            kind="research_report_markdown",
+            created_by_step="build_research_report",
+            metadata={"report_id": report.report_id},
+        )
+    for run in report.scenario_runs:
+        trace.record_artifacts_from_run(run, created_by_step="build_research_report")
+        _RUN_CACHE[run.run_id] = run
+    trace.finalize(outputs={"report_id": report.report_id, "seed": seed})
+    return report
+
+
+@mcp.tool()
+async def get_cost_report(run_id: str, ctx: Context | None = None) -> CostReport:
+    """Return deterministic cost telemetry estimate for a known run."""
+    run = _RUN_CACHE.get(run_id)
+    if run is None:
+        return CostReport(run_id=run_id, notes="run_id not found in in-process cache")
+    return estimate_cost_report(run)
+
+
+@mcp.tool()
+async def fit_models(
+    run_id: str | None = None,
+    db_path: str | None = None,
+    models: list[str] | None = None,
+    ctx: Context | None = None,
+) -> list[dict[str, Any]]:
+    """Fit lightweight model summaries over a scenario trace JSON payload."""
+    resolved_path = db_path
+    if run_id and run_id in _RUN_CACHE:
+        resolved_path = _RUN_CACHE[run_id].db_path
+    trace = load_trace_payload(resolved_path)
+    fits = fit_models_from_trace(trace, models=models)
+    return [f.model_dump() for f in fits]
+
+
+@mcp.tool()
+async def replay_policy(
+    policy: dict[str, Any],
+    scenario: str = "oteemo_billable",
+    seed: int = 42,
+    periods: int = 12,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Replay candidate policy vs baseline and return robustness deltas."""
+    return replay_policy_robustness(policy, scenario=scenario, seed=seed, periods=periods)
+
+
+@mcp.tool()
+async def get_run_artifacts(
+    run_id: str,
+    prefer_surreal: bool = True,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Fetch persisted scenario artifacts by run_id."""
+    return fetch_run_artifacts(run_id, prefer_surreal=prefer_surreal)
+
+
+@mcp.tool()
+async def query_attributions(
+    run_id: str,
+    period_min: int | None = None,
+    period_max: int | None = None,
+    level: str | None = None,
+    aggregate: str | None = None,
+    prefer_surreal: bool = True,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Query attribution rows by run with optional filters and aggregate helper."""
+    return query_run_attributions(
+        run_id,
+        period_min=period_min,
+        period_max=period_max,
+        level=level,
+        aggregate=aggregate,
+        prefer_surreal=prefer_surreal,
     )
 
 
@@ -146,12 +310,8 @@ async def validate_agent_yaml(yaml_text: str, ctx: Context | None = None) -> dic
         return {"valid": False, "error": exc if isinstance(exc, dict) else {"message": str(exc)}}
 
 
-# Future tools (stubs for contract surface):
-# - ask(question) -> ResearchReport
-# - get_cost_report(run_id) -> CostReport
-# - fit_models(db_path, models) -> list[ModelFitResult]
-
-# --- Ontology recall layer (Weaviate first-cut; thin surface, heavy in ontology_ingest) ---
+# Ontology recall layer (Weaviate first-cut; thin surface, heavy in ontology_ingest)
+# Includes explicit delete_ontology (first-class, not only implicit reindex side-effect).
 @mcp.tool()
 async def ingest_ontology(target: str = "weaviate", paths: list[str] | None = None, ctx: Context | None = None) -> dict[str, Any]:
     """

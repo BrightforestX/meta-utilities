@@ -1,0 +1,66 @@
+name: scenario-research surreal integration
+
+on:
+  pull_request:
+    paths:
+      - "mcp-servers/scenario-research/**"
+      - ".github/workflows/scenario-research-surreal-integration.yml"
+  push:
+    paths:
+      - "mcp-servers/scenario-research/**"
+      - ".github/workflows/scenario-research-surreal-integration.yml"
+
+jobs:
+  surreal-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install scenario-research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./mcp-servers/scenario-research
+          python -m pip install pytest
+
+      - name: Start SurrealDB container
+        run: |
+          docker run -d --name surreal-test -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root memory
+
+      - name: Wait for SurrealDB health
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              echo "SurrealDB is healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "SurrealDB failed to become healthy"
+          docker logs surreal-test || true
+          exit 1
+
+      - name: Run live Surreal integration tests
+        env:
+          SURREAL_URL: http://127.0.0.1:8000
+          SURREAL_NS: odrs
+          SURREAL_DB: memory
+          SURREAL_USER: root
+          SURREAL_PASS: root
+          SCENARIO_SURREAL_SCHEMA_RECONCILE: "true"
+        run: |
+          python -m pytest mcp-servers/scenario-research/tests/test_surreal_integration.py -q
+
+      - name: Dump Surreal logs on failure
+        if: failure()
+        run: docker logs surreal-test || true
+
+      - name: Stop SurrealDB container
+        if: always()
+        run: docker rm -f surreal-test || true

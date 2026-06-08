@@ -189,7 +189,7 @@ function extractSparklinesFromReport(report: string): { util?: number[]; maturit
   };
 }
 
-// Small live context box (yellow per prior design, polished)
+// Small live context box (yellow per prior design, polished) — kept from delete/ontology work
 function LiveBusinessContextBox({ ctx }: { ctx: any }) {
   if (!ctx) return null;
   return (
@@ -201,7 +201,7 @@ function LiveBusinessContextBox({ ctx }: { ctx: any }) {
   );
 }
 
-// useWindowSize polyfill (works on ink 5 + any node; query calls for "ink's useWindowSize() + layout (height=rows or ViewportFooter patterns)")
+// useWindowSize polyfill (works on ink 5 + any node)
 function useWindowSize() {
   const [size, setSize] = useState(() => ({
     columns: process.stdout.columns || 100,
@@ -226,6 +226,66 @@ function useWindowSize() {
     };
   }, [stdout]);
   return size;
+}
+
+// PR1 low-risk execution ranking helpers (additive; used to surface lowest-risk recs first in TUI)
+type ExecutionRisk = "low" | "medium" | "high";
+
+function riskScore(risk: ExecutionRisk | undefined): number {
+  if (risk === "low") return 0;
+  if (risk === "medium") return 1;
+  return 2;
+}
+
+function enrichRecommendation(rec: LeaderRec, useLive: boolean): LeaderRec {
+  const roleBlob = `${rec.name} ${rec.role}`.toLowerCase();
+  if (roleBlob.includes("arka")) {
+    return {
+      ...rec,
+      executionRisk: "low",
+      reasoning: "Arcade toolkit-driven changes are reversible and have narrow blast radius.",
+      executionPath: "arcade_list_toolkits -> arcade_call_tool",
+    };
+  }
+  if (roleBlob.includes("rod") || roleBlob.includes("roderick")) {
+    return {
+      ...rec,
+      executionRisk: "low",
+      reasoning: useLive
+        ? "Composio-backed pull path is already grounded by live context signals."
+        : "Composio path can start with read-only discovery before any write action.",
+      executionPath: "composio_list_tools(slug:salesforce|gmail|slack) -> composio_call_tool",
+    };
+  }
+  if (roleBlob.includes("raja")) {
+    return {
+      ...rec,
+      executionRisk: "medium",
+      reasoning: "Finance policy adjustments impact wider budget controls and should be staged.",
+      executionPath: "composio_list_apps -> composio_call_tool (pipeline/forecast updates)",
+    };
+  }
+  if (roleBlob.includes("clifford")) {
+    return {
+      ...rec,
+      executionRisk: "medium",
+      reasoning: "Contractor leverage changes are effective but usually require broader coordination.",
+      executionPath: "scenario policy replay (local) -> optional arcade/composio follow-up",
+    };
+  }
+  return {
+    ...rec,
+    executionRisk: "medium",
+    reasoning: "Defaulted to medium risk due to missing role-specific execution profile.",
+  };
+}
+
+function rankLowestRiskFirst(recs: LeaderRec[]): LeaderRec[] {
+  return [...recs].sort((a, b) => {
+    const riskCmp = riskScore(a.executionRisk) - riskScore(b.executionRisk);
+    if (riskCmp !== 0) return riskCmp;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 export function OteemoChat() {
@@ -293,6 +353,46 @@ export function OteemoChat() {
       sparkMat = sp.maturity;
       reportMd = latest.content.split("\n").slice(0, 40).join("\n") + "\n... (use 'show report' for full)";
     }
+    if (recs.length === 0) {
+        recs = [
+          {
+            name: "Raja (CEO/FinOps)",
+            role: "strategy + FinOps",
+            rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.",
+            metric: "maturity >=0.35",
+          },
+          {
+            name: "Arka (VP Tech)",
+            role: "platform leverage",
+            rec: "Focus GraphRAG/A2A leverage; efficiency_mult compounds.",
+            metric: "efficiency",
+          },
+          {
+            name: "Rod (Fed Delivery)",
+            role: "billable owner",
+            rec: "client_target_util + bid_aggressiveness per horizon windows." + (useLive && lastLiveContext ? "  [LIVE: +bid_aggr suggested from recent client thread volume]" : ""),
+            metric: "util / bench",
+          },
+          {
+            name: "Clifford (Contractor)",
+            role: "Axiom FinOps fixed",
+            rec: "Fixed internal_platform + PDR telemetry for cost attribution.",
+            metric: "+maturity boost",
+          },
+        ];
+      }
+      const ranked = rankLowestRiskFirst(recs.map((r) => enrichRecommendation(r, useLive)));
+      const topTwo = ranked.slice(0, 2);
+      const note = latest
+        ? `Report: ${latest.path}. Showing top 2 lowest execution-risk candidates. Follow up: 're-run 8 --optimize', 'show report', 'validate <yaml>', 'pull gmail PEO', 'enrich with live'.`
+        : "Full report + json written under oteemo/reports/. Showing top 2 lowest execution-risk candidates.";
+
+      const liveBusinessContext = useLive && lastLiveContext ? lastLiveContext : undefined;
+      return { summary, recs: topTwo, note, reportMd, sparkUtil, sparkMat, raw: run, liveBusinessContext };
+    } finally {
+      setBusy(false);
+    }
+    // Fallback recs (when no latest report could be loaded from disk)
     if (recs.length === 0) {
       recs = [
         { name: "Raja (CEO/FinOps)", role: "strategy + FinOps", rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.", metric: "maturity >=0.35" },
@@ -364,6 +464,7 @@ export function OteemoChat() {
   }, []);
 
   // --- Ontology handlers (thin: parse + manager.scenario.call + render; heavy in scenario-research MCP) ---
+  // Kept + extended for delete support (first-class explicit deletes in TUI)
   const handleIngestOntology = useCallback(async () => {
     const mgr = managerRef.current;
     if (!mgr) return "Manager not ready.";
@@ -378,6 +479,65 @@ export function OteemoChat() {
           summary = `Ingested ${j.inserted ?? "?"} chunks into ${j.collection || "meta_ontology"} (cleared ${j.cleared_prior ?? 0} prior). Sources: ${(j.roots || []).join(", ")}`;
         } else if (j) {
           summary = `Ingest result: ${j.msg || JSON.stringify(j).slice(0, 200)}`;
+        }
+      } catch { /* non-json ok */ }
+      return { kind: "ontology", action: "ingest", text: summary };
+    } catch (e: any) {
+      return `Ontology ingest error (graceful): ${String(e)}`;
+    }
+  }, []);
+
+  const handleSearchOntology = useCallback(async (query: string) => {
+    const mgr = managerRef.current;
+    if (!mgr) return "Manager not ready.";
+    setMode("Ontology Search");
+    try {
+      const res = await mgr.scenario.call("search_ontology", { query, top_k: 5 });
+      return { kind: "ontology", action: "search", query, results: res };
+    } catch (e: any) {
+      return `Ontology search error (graceful): ${String(e)}`;
+    }
+  }, []);
+
+  const handleDeleteOntology = useCallback(async (payload: any) => {
+    const mgr = managerRef.current;
+    if (!mgr) return "Manager not ready.";
+    setMode("Ontology Delete");
+    try {
+      const args: any = {};
+      if (payload?.delete_all) args.delete_all = true;
+      if (payload?.name) args.name = payload.name;
+      if (payload?.source) args.source = payload.source;
+      if (payload?.entity_type) args.entity_type = payload.entity_type;
+      const res = await mgr.scenario.call("delete_ontology", args);
+      return { kind: "ontology", action: "delete", ...args, result: res };
+    } catch (e: any) {
+      return `Ontology delete error (graceful): ${String(e)}`;
+    }
+  }, []);
+
+  async function send(text: string) {
+    setMessages((m) => [...m, { role: "user", content: text }]);
+    const intent = parseIntent(text);
+    let reply: any = "Command not recognized. Try 'run oteemo 6 --optimize' or 'help'.";
+
+    if (intent.kind === "run_oteemo") {
+      reply = await handleRunOteemo(intent.payload);
+    } else if (intent.kind === "pull_context") {
+      reply = await handlePullBusinessContext(intent.payload?.query || "");
+    } else if (intent.kind === "enrich_px") {
+      reply = await handleEnrich();
+    } else if (intent.kind === "health") {
+      reply = manager ? "scenario + px (if present) connected. Use 'run oteemo'." : "Manager initializing...";
+    } else if (intent.kind === "help") {
+      reply = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, ingest|search|delete ontology ..., health, help. Defaults to top 2 lowest-risk candidates with reasoning + composio/arcade execution path hints.";
+    } else if (intent.kind === "validate_yaml") {
+      if (manager) {
+        try {
+          const v = await manager.scenario.call("validate_agent_yaml", { yaml_text: intent.payload?.yaml || "" });
+          reply = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+        } catch (e: any) {
+          reply = `validate error: ${String(e)}`;
         }
       } catch { /* not json */ }
       return { kind: "ontology_result", summary, raw: parsed };

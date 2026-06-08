@@ -56,6 +56,126 @@ tool_timeouts = { scenario_research = 3600, run_scenario = 3600 }
 - Client: `SCENARIO_RESEARCH_TIMEOUT_SEC` (default 1800s for heavy sims).
 - Host: `tool_timeouts` entry for the long tools.
 
+## Local inference backends (cost reduction)
+
+Router supports local backends for low-cost execution:
+
+- `mlx` (default)
+- `ollama`
+- `lmstudio`
+- `turnover` (local gateway/provider slot)
+
+Configure with env vars:
+
+- `SCENARIO_RESEARCH_LOCAL_PROVIDER=mlx|ollama|lmstudio|turnover`
+- Provider model envs:
+  - `SCENARIO_RESEARCH_MLX_MODEL` (default `mlx-qwen`)
+  - `SCENARIO_RESEARCH_OLLAMA_MODEL` (default `qwen2.5:14b-instruct`)
+  - `SCENARIO_RESEARCH_LMSTUDIO_MODEL` (default `local-model`)
+  - `SCENARIO_RESEARCH_TURNOVER_MODEL` (default `turnover-local`)
+- Optional provider base URLs:
+  - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+  - `LMSTUDIO_BASE_URL` (default `http://localhost:1234/v1`)
+  - `TURNOVER_BASE_URL` (default `http://localhost:8080`)
+
+If you want maximum cost savings for planning/writer roles too, enable:
+
+- `SCENARIO_RESEARCH_COST_SAVER_MODE=true`
+
+That forces frontier roles to local inference for the run.
+
+Check provider reachability before runs:
+
+```bash
+scenario-research providers
+scenario-research providers --active-only
+scenario-research prov --active-only --timeout-sec 0.5
+```
+
+Note: `mlx` is typically an in-process local runtime, so probe output will mark it as a non-HTTP endpoint rather than pinging a network health URL.
+
+## LinkML -> Surreal + run artifact writes
+
+Step 1 (implemented): LinkML memory schema compilation to SurrealQL:
+- `scenario_research/linkml_surreal.py::compile_linkml_to_surrealql`
+- source schema: `ontology/memory/linkml_data_model.yaml`
+- emits namespace/db/table/field/index DDL for `MemoryItem`, `ScenarioTrace`, `Attribution`, `LiveBusinessContext`
+
+Step 2 (implemented): write-path adapter for scenario artifacts:
+- `ScenarioSurrealWriter` + `persist_run_artifacts`
+- CLI and MCP `run` paths call this after scenario execution
+- if `SURREAL_URL` is healthy: runs additive schema reconcile and writes records
+- fallback: writes local payload JSON to `.context/scenario-surreal-writes/` (or `SCENARIO_SURREAL_FALLBACK_DIR`)
+- writes are deterministic/idempotent via explicit record IDs + `UPSERT`:
+  - `ScenarioTrace` keyed by `run_id + period`
+  - `Attribution` keyed by policy attribution key
+  - `LiveBusinessContext` keyed by `trace_id + scenario`
+
+Read path (implemented):
+- `ScenarioSurrealReader` + `fetch_run_artifacts(run_id)`
+- attempts Surreal query first (configurable), then falls back to local payload file
+- CLI commands:
+  - `scenario-research artifacts <run_id>`
+  - `scenario-research arts <run_id>`
+  - `scenario-research attributions <run_id> --period-min ... --period-max ... --aggregate ...`
+  - `scenario-research attrs <run_id> ...`
+
+Surreal envs:
+- `SURREAL_URL`
+- `SURREAL_NS` (default `odrs`)
+- `SURREAL_DB` (default `memory`)
+- optional auth: `SURREAL_USER`, `SURREAL_PASS`
+- optional timeout: `SURREAL_TIMEOUT_SEC`
+- optional schema reconcile toggle: `SCENARIO_SURREAL_SCHEMA_RECONCILE` (default `true`)
+
+## Observability (LangSmith + local lineage ledger)
+
+Scenario run/ask flows emit explicit, replayable reasoning + artifact lineage.
+
+- LangSmith (optional, recommended):
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_PROJECT` (default: `scenario-research`)
+  - `LANGSMITH_TRACING=true` (set `false` to disable remote publish)
+- Local ledger (always written):
+  - `SCENARIO_RESEARCH_TRACE_DIR` (default: `mcp-servers/scenario-research/.context/scenario-research-traces`)
+
+Each trace captures:
+- `trace_id`
+- step-level `reasoning_summary` (explicit reasoning notes, not hidden model CoT)
+- step inputs/outputs
+- artifact lineage (`path`, `kind`, `created_by_step`, existence/size)
+- run outputs + status/error
+
+`ScenarioRun.config_snapshot.observability` includes the active `trace_id` and artifact list so downstream tools (CLI/TUI/MCP consumers) can join on lineage.
+
+## MCP analysis tools (implemented)
+
+In addition to `run_scenario` and `ask`, the server now exposes:
+
+- `get_cost_report(run_id)` -> deterministic local/api token estimate from run artifacts
+- `fit_models(run_id|db_path, models)` -> lightweight fit summaries (`sir`, `hawkes`, `bounded_confidence`, `bayesian_ab`)
+- `replay_policy(policy, scenario, seed, periods)` -> baseline-vs-treatment robustness deltas (implemented for `oteemo_billable`)
+- `get_run_artifacts(run_id, prefer_surreal)` -> fetch persisted ScenarioTrace/Attribution/context by run id
+- `query_attributions(run_id, period_min, period_max, level, aggregate, prefer_surreal)` -> filtered attribution rows + optional aggregates
+
+## Ask pipeline (artifact-producing)
+
+`ask` now runs a full local research pipeline (not shape-only fallback):
+
+- selects a scenario (currently `oteemo_billable`)
+- executes scenario run
+- persists artifacts via Surreal write adapter (or fallback payload)
+- computes model fit summaries + deterministic cost telemetry
+- computes baseline-vs-treatment replay robustness
+- writes a markdown report artifact to `SCENARIO_RESEARCH_REPORT_DIR` (default `.context/scenario-research-reports`)
+
+CLI:
+
+```bash
+scenario-research ask "How do we improve billable utilization?" -s 42
+scenario-research q "How do we improve billable utilization?" -s 42
+```
+
 ## PostgreSQL
 
 Optional everywhere. SQLite is the portable baseline for dev/CI. Full constraint enforcement is a prod nicety.

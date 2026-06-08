@@ -80,6 +80,97 @@ def test_router_frontier_for_planner_roles():
     assert get_model_for_role("planner").startswith("frontier:")
 
 
+def test_router_supports_ollama_lmstudio_and_turnover_local_providers(monkeypatch):
+    from scenario_research.router import get_local_inference_config
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "ollama")
+    monkeypatch.setenv("SCENARIO_RESEARCH_OLLAMA_MODEL", "llama3.1:8b")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "ollama"
+    assert get_model_for_role("oasis_agent") == "local:ollama:llama3.1:8b"
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "lmstudio")
+    monkeypatch.setenv("SCENARIO_RESEARCH_LMSTUDIO_MODEL", "qwen2.5-7b-instruct")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "lmstudio"
+    assert get_model_for_role("oasis_agent") == "local:lmstudio:qwen2.5-7b-instruct"
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "turnover")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TURNOVER_MODEL", "turnover-local-14b")
+    cfg = get_local_inference_config()
+    assert cfg["provider"] == "turnover"
+    assert get_model_for_role("oasis_agent") == "local:turnover:turnover-local-14b"
+
+
+def test_router_cost_saver_mode_forces_frontier_roles_to_local(monkeypatch):
+    monkeypatch.setenv("SCENARIO_RESEARCH_COST_SAVER_MODE", "true")
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "ollama")
+    monkeypatch.setenv("SCENARIO_RESEARCH_OLLAMA_MODEL", "llama3.1:8b")
+
+    assert resolve_endpoint("planner") == "local"
+    assert get_model_for_role("planner") == "local:ollama:llama3.1:8b"
+
+
+def test_probe_local_providers_active_only_uses_selected_provider(monkeypatch):
+    from scenario_research.router import probe_local_providers
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "lmstudio")
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+
+    called: list[str] = []
+
+    def fake_ping(url: str, timeout_sec: float):
+        called.append(url)
+        return (True, 200, None)
+
+    rows = probe_local_providers(active_only=True, timeout_sec=0.1, ping_fn=fake_ping)
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "lmstudio"
+    assert rows[0]["ok"] is True
+    assert called[0].endswith("/v1/models")
+
+
+def test_probe_local_providers_reports_mlx_as_non_http_runtime(monkeypatch):
+    from scenario_research.router import probe_local_providers
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_LOCAL_PROVIDER", "mlx")
+    rows = probe_local_providers(active_only=True, timeout_sec=0.1)
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "mlx"
+    assert rows[0]["ok"] is False
+    assert "non-http local runtime endpoint" in str(rows[0]["error"])
+
+
+def test_cli_providers_command_reports_reachability():
+    import ast
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["SCENARIO_RESEARCH_LOCAL_PROVIDER"] = "ollama"
+    env["OLLAMA_BASE_URL"] = "http://127.0.0.1:9"
+
+    out = subprocess.check_output(
+        [
+            sys.executable,
+            "-m",
+            "scenario_research.cli",
+            "providers",
+            "--active-only",
+            "--timeout-sec",
+            "0.2",
+        ],
+        text=True,
+        env=env,
+    )
+    payload = ast.literal_eval(out.strip())
+    assert payload["active_provider"] == "ollama"
+    assert len(payload["providers"]) == 1
+    assert payload["providers"][0]["provider"] == "ollama"
+    assert payload["providers"][0]["ok"] is False
+
+
 def test_dto_roundtrip_json():
     run = ScenarioRun(run_id="r2", scenario="marketing_ab", n_agents=100, n_steps=20)
     js = run.model_dump_json()
@@ -180,7 +271,148 @@ def test_p6_optimizer_contract_and_replay():
     res = optimize_policy(cands, objective="profit")
     assert "chosen" in res and "status" in res
     rep = replay_policy(res.get("chosen") or {})
-    assert "robustness_delta" in rep and rep["status"] in ("stub", "solved")
+    assert "robustness_delta" in rep and rep["status"] == "solved"
+    assert "baseline" in rep and "treatment" in rep
+
+
+def test_replay_policy_is_deterministic_for_same_seed():
+    from scenario_research.optimization.replay import replay_policy
+
+    policy = {"raja": {"finops_tier": "efficient"}, "rod": {"client_target_util": 0.7}}
+    rep1 = replay_policy(policy, scenario="oteemo_billable", seed=7, periods=5)
+    rep2 = replay_policy(policy, scenario="oteemo_billable", seed=7, periods=5)
+    assert rep1["status"] == "solved"
+    assert rep1["robustness_delta"] == rep2["robustness_delta"]
+    assert rep1["uncertainty"] == rep2["uncertainty"]
+
+
+def test_server_cost_report_and_fit_models_tools(tmp_path):
+    import asyncio
+    import json
+    import sys
+    import types
+
+    class _DummyFastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def run(self):
+            return None
+
+    if "fastmcp" not in sys.modules:
+        sys.modules["fastmcp"] = types.SimpleNamespace(FastMCP=_DummyFastMCP, Context=object)
+
+    import scenario_research.server as server_mod
+
+    trace_path = tmp_path / "trace.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "util_trajectory": [0.6, 0.63, 0.65, 0.67],
+                    "pdr_attributions": [{"period": 1, "delta_util": 0.03, "invest_cost": 4.0}],
+                }
+            }
+        )
+    )
+    run = ScenarioRun(
+        run_id="run-tools-1",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=4,
+        seed=42,
+        db_path=str(trace_path),
+        status="succeeded",
+        config_snapshot={},
+    )
+    server_mod._RUN_CACHE[run.run_id] = run
+
+    cost = asyncio.run(server_mod.get_cost_report(run_id=run.run_id))
+    assert cost.run_id == run.run_id
+    assert cost.local_tokens > 0
+
+    fits = asyncio.run(server_mod.fit_models(run_id=run.run_id, models=["sir", "bayesian_ab"]))
+    assert isinstance(fits, list)
+    assert len(fits) == 2
+    assert fits[0]["model"] == "sir"
+    assert fits[1]["model"] == "bayesian_ab"
+
+    fb_dir = tmp_path / "sf"
+    fb_dir.mkdir(parents=True, exist_ok=True)
+    (fb_dir / f"{run.run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run.run_id, "period": 4},
+                    "attributions": [
+                        {"run_id": run.run_id, "period": 1, "level": "policy", "cost": 4.0, "delta": 0.02}
+                    ],
+                    "live_business_context": {"signals": {"run_id": run.run_id}},
+                }
+            }
+        )
+    )
+    old_env = __import__("os").environ.get("SCENARIO_SURREAL_FALLBACK_DIR")
+    __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = str(fb_dir)
+    try:
+        artifacts = asyncio.run(server_mod.get_run_artifacts(run_id=run.run_id, prefer_surreal=False))
+        attr = asyncio.run(
+            server_mod.query_attributions(
+                run_id=run.run_id,
+                period_min=1,
+                period_max=1,
+                level="policy",
+                aggregate="sum_cost_by_level",
+                prefer_surreal=False,
+            )
+        )
+    finally:
+        if old_env is None:
+            __import__("os").environ.pop("SCENARIO_SURREAL_FALLBACK_DIR", None)
+        else:
+            __import__("os").environ["SCENARIO_SURREAL_FALLBACK_DIR"] = old_env
+    assert artifacts["found"] is True
+    assert artifacts["scenario_trace"]["run_id"] == run.run_id
+    assert attr["count"] == 1
+    assert attr["aggregate"]["kind"] == "sum_cost_by_level"
+
+
+def test_server_ask_returns_artifact_backed_report(tmp_path, monkeypatch):
+    import asyncio
+    import sys
+    import types
+    from pathlib import Path
+
+    class _DummyFastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def run(self):
+            return None
+
+    if "fastmcp" not in sys.modules:
+        sys.modules["fastmcp"] = types.SimpleNamespace(FastMCP=_DummyFastMCP, Context=object)
+
+    import scenario_research.server as server_mod
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    report = asyncio.run(server_mod.ask(question="Improve billable utilization", seed=6))
+    assert report.report_path
+    assert Path(report.report_path).exists()
+    assert report.scenario_runs
+    assert report.fits
 
 
 
@@ -234,6 +466,54 @@ def test_p2_agent_yaml_has_tools_policies_and_pops():
     assert "oasis_actions" in load_tools().get("tools", {})
     assert "cost_control" in load_policies().get("policies", {})
     assert "standard_36" in load_population_templates().get("templates", {})
+
+
+def test_p2_scenario_yaml_load_and_compile():
+    from scenario_research.agent_compiler import load_scenarios, compile_scenario_spec
+    scenarios_doc = load_scenarios()
+    assert scenarios_doc.get("schema_version", "").startswith("odrs-scenarios/")
+    assert "scenarios" in scenarios_doc
+
+    spec = compile_scenario_spec("oteemo_billable")
+    assert spec["name"] == "oteemo_billable"
+    assert spec["execution_risk_default"] in ("low", "medium", "high")
+    assert "n_steps" in spec.get("parameters", {})
+
+
+def test_p2_deterministic_scenario_compiler_output():
+    from scenario_research.agent_compiler import canonical_scenario_config
+    c1 = canonical_scenario_config("info_spread")
+    c2 = canonical_scenario_config("info_spread")
+    assert c1 == c2
+    assert '"name":"info_spread"' in c1
+
+
+def test_p2_ontology_reference_resolution_by_folder_and_linkml_name():
+    from scenario_research.agent_compiler import resolve_ontology_base
+    folder = resolve_ontology_base("agents")
+    by_name = resolve_ontology_base("odrs_agents")
+    assert folder == by_name
+    assert folder.name == "agents"
+
+
+def test_p3_validate_before_run_accepts_linkml_name_reference():
+    from scenario_research.validation import validate_before_run
+    # using LinkML "name: odrs_agents" should resolve to ontology/agents
+    validate_before_run("info_spread", n_steps=2, n_agents=36, seed=42, ontology_ref="odrs_agents")
+
+
+def test_p3_validate_before_run_rejects_unknown_ontology_reference():
+    from scenario_research.validation import validate_before_run
+    with pytest.raises(ValueError) as e:
+        validate_before_run("info_spread", n_steps=2, n_agents=36, seed=42, ontology_ref="no_such_ontology")
+    assert "unknown ontology reference" in str(e.value)
+
+
+def test_p3_validate_before_run_rejects_out_of_bounds_scenario_param():
+    from scenario_research.validation import validate_before_run
+    with pytest.raises(ValueError) as e:
+        validate_before_run("oteemo_billable", n_steps=999, n_agents=4, seed=42)
+    assert "SCENARIO_PARAM_MAX" in str(e.value)
 
 
 def test_oteemo_governed_leadership_roles_compile_and_distinct():
@@ -365,4 +645,460 @@ def test_oteemo_leadership_roles_compile_only_with_oteemo_base():
         assert spec["name"] == name
         assert "odrs-agents/1" in spec.get("source", "")
         assert spec.get("kind") in ("leadership_decision", "specialist_contributor")
+
+
+def test_cli_aliases_and_short_flags_cover_simplified_commands():
+    import subprocess
+    import sys
+
+    base = [sys.executable, "-m", "scenario_research.cli"]
+
+    out_v = subprocess.check_output(base + ["v"], text=True)
+    assert "scenario-research 0.1.0" in out_v
+
+    out_h = subprocess.check_output(base + ["h"], text=True)
+    assert "'ok': True" in out_h
+
+    out_onts = subprocess.check_output(base + ["ontologies"], text=True)
+    assert "'folder': 'agents'" in out_onts
+    assert "'linkml_name': 'odrs_agents'" in out_onts
+
+    out_prov = subprocess.check_output(base + ["prov", "--active-only", "--timeout-sec", "0.2"], text=True)
+    assert "'active_provider'" in out_prov
+    assert "'providers'" in out_prov
+
+    out_run = subprocess.check_output(
+        base + ["r", "oteemo_billable", "-a", "4", "-n", "2", "-s", "42", "-o", "odrs_agents"],
+        text=True,
+    )
+    assert "'scenario': 'oteemo_billable'" in out_run
+    assert "'status': 'succeeded'" in out_run
+
+    # Defaults are now ontology-driven; this should not fail on n_agents validation.
+    out_run_defaults = subprocess.check_output(base + ["run", "oteemo_billable"], text=True)
+    assert "'status': 'succeeded'" in out_run_defaults
+
+    out_arts = subprocess.check_output(base + ["arts", "oteemo_billable-42", "--prefer-fallback"], text=True)
+    assert "'run_id': 'oteemo_billable-42'" in out_arts
+
+    out_attrs = subprocess.check_output(
+        base + ["attrs", "oteemo_billable-42", "--prefer-fallback", "--aggregate", "sum_cost_by_level"],
+        text=True,
+    )
+    assert "'aggregate'" in out_attrs
+
+
+def test_p3_observability_trace_ledger_tracks_reasoning_and_artifacts(tmp_path, monkeypatch):
+    import json
+    from scenario_research.observability import traced
+
+    trace_dir = tmp_path / "traces"
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TRACE_DIR", str(trace_dir))
+
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text('{"ok": true}')
+
+    t = traced(
+        name="unit.observability",
+        inputs={"x": 1},
+        metadata={"surface": "test"},
+    )
+    t.record_step(
+        name="example_step",
+        inputs={"foo": "bar"},
+        outputs={"ok": True},
+        reasoning_summary="Validated input then created artifact.",
+    )
+    t.record_artifact(
+        path=str(artifact),
+        kind="json_artifact",
+        created_by_step="example_step",
+    )
+    t.finalize(outputs={"done": True})
+
+    ledger = trace_dir / f"{t.trace_id}.json"
+    assert ledger.exists()
+    doc = json.loads(ledger.read_text())
+    assert doc["trace_id"] == t.trace_id
+    assert doc["steps"][0]["reasoning_summary"] == "Validated input then created artifact."
+    assert doc["artifacts"][0]["path"] == str(artifact)
+    assert doc["artifacts"][0]["exists"] is True
+
+
+def test_cli_run_emits_observability_metadata_and_trace_ledger(tmp_path, monkeypatch):
+    import json
+    import scenario_research.cli as cli_mod
+
+    trace_dir = tmp_path / "t"
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("SCENARIO_RESEARCH_TRACE_DIR", str(trace_dir))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
+
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._run_impl("oteemo_billable", agents=4, steps=2, seed=42, ontology=None)
+    payload = captured["payload"]
+    obs = payload.get("config_snapshot", {}).get("observability", {})
+    assert obs.get("trace_id"), "trace_id must be attached to ScenarioRun output"
+    assert isinstance(obs.get("artifacts"), list)
+    assert len(obs["artifacts"]) >= 1
+
+    ledger = trace_dir / f"{obs['trace_id']}.json"
+    assert ledger.exists()
+    ledger_doc = json.loads(ledger.read_text())
+    assert ledger_doc["outputs"]["run_id"] == payload["run_id"]
+
+
+def test_linkml_to_surreal_compiler_emits_expected_ddl():
+    from scenario_research.linkml_surreal import compile_linkml_to_surrealql
+    from pathlib import Path
+
+    linkml = Path(__file__).resolve().parents[1] / "ontology" / "memory" / "linkml_data_model.yaml"
+    ddl = compile_linkml_to_surrealql(linkml, namespace="odrs", database="memory")
+    assert "DEFINE NAMESPACE IF NOT EXISTS odrs;" in ddl
+    assert "DEFINE DATABASE IF NOT EXISTS memory;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS MemoryItem SCHEMAFULL;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace SCHEMAFULL;" in ddl
+    assert "DEFINE TABLE IF NOT EXISTS Attribution SCHEMAFULL;" in ddl
+    assert "DEFINE INDEX IF NOT EXISTS MemoryItem_id_uniq" in ddl
+
+
+def test_scenario_surreal_writer_fallback_persists_payload(tmp_path):
+    import json
+    from pathlib import Path
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "pdr_attributions": [
+                        {"period": 1, "delta_util": 0.01, "invest_cost": 4.0, "attribution_level": "policy"}
+                    ]
+                }
+            }
+        )
+    )
+
+    run = ScenarioRun(
+        run_id="r-surreal-fallback",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"raja": {"axiom_invest_frac": 0.22}}},
+    )
+    writer = ScenarioSurrealWriter(
+        surreal=None,
+        fallback_dir=tmp_path / "surreal-fallback",
+    )
+    out = writer.store_scenario_run(run, trace_id="t-1", ontology_ref="odrs_agents")
+    assert out["backend"] == "fallback"
+    fp = Path(out["fallback_path"])
+    assert fp.exists()
+    payload = json.loads(fp.read_text())
+    assert payload["records"]["scenario_trace"]["run_id"] == run.run_id
+    assert len(payload["records"]["attributions"]) == 1
+
+
+def test_scenario_surreal_writer_uses_surreal_when_healthy(tmp_path):
+    import json
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(json.dumps({"trace": {"pdr_attributions": []}}))
+
+    run = ScenarioRun(
+        run_id="r-surreal-live",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"rod": {"client_target_util": 0.68}}},
+    )
+
+    class FakeSurreal:
+        def __init__(self):
+            self.calls = []
+
+        def is_healthy(self):
+            return True
+
+        def execute_sql(self, sql: str):
+            self.calls.append(sql)
+            return {"ok": True}
+
+        def inspect_schema(self):
+            return {"tables": {}}
+
+    fake = FakeSurreal()
+    writer = ScenarioSurrealWriter(
+        surreal=fake,  # type: ignore[arg-type]
+        fallback_dir=tmp_path / "surreal-fallback",
+    )
+    out = writer.store_scenario_run(run, trace_id="t-2", ontology_ref="agents")
+    assert out["backend"] == "surreal"
+    assert out["records_written"] >= 1
+    assert len(fake.calls) >= 2  # schema + write
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace" in fake.calls[0]
+    assert "UPSERT ScenarioTrace:" in fake.calls[1]
+
+
+def test_scenario_surreal_writer_upsert_ids_are_deterministic(tmp_path):
+    import json
+    from scenario_research.linkml_surreal import ScenarioSurrealWriter
+
+    trace_json = tmp_path / "trace.json"
+    trace_json.write_text(
+        json.dumps(
+            {
+                "trace": {
+                    "pdr_attributions": [
+                        {"period": 1, "delta_util": 0.02, "invest_cost": 10.0, "attribution_level": "policy"}
+                    ]
+                }
+            }
+        )
+    )
+    run = ScenarioRun(
+        run_id="r-idempotent",
+        scenario="oteemo_billable",
+        n_agents=4,
+        n_steps=2,
+        seed=42,
+        db_path=str(trace_json),
+        status="succeeded",
+        config_snapshot={"policy": {"raja": {"axiom_invest_frac": 0.22}}},
+    )
+
+    class FakeSurreal:
+        def __init__(self):
+            self.calls = []
+
+        def is_healthy(self):
+            return True
+
+        def execute_sql(self, sql: str):
+            self.calls.append(sql)
+            return {"ok": True}
+
+        def inspect_schema(self):
+            return {"tables": {}}
+
+    fake = FakeSurreal()
+    writer = ScenarioSurrealWriter(surreal=fake, fallback_dir=tmp_path / "surreal-fallback")  # type: ignore[arg-type]
+
+    first = writer.store_scenario_run(run, trace_id="trace-1", ontology_ref="agents")
+    second = writer.store_scenario_run(run, trace_id="trace-1", ontology_ref="agents")
+
+    assert first["backend"] == "surreal"
+    assert second["backend"] == "surreal"
+    # calls[1] and calls[3] are the write statements (calls[0]/[2] are schema reconcile SQL)
+    assert "UPSERT ScenarioTrace:" in fake.calls[1]
+    assert fake.calls[1] == fake.calls[3], "Repeated writes for same run must be deterministic and idempotent"
+
+
+def test_fetch_run_artifacts_reads_fallback_payload(tmp_path, monkeypatch):
+    import json
+    from scenario_research.linkml_surreal import fetch_run_artifacts
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-fallback-read"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id, "period": 2},
+                    "attributions": [{"run_id": run_id, "policy_id": f"{run_id}:1"}],
+                    "live_business_context": {"signals": {"run_id": run_id}},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    out = fetch_run_artifacts(run_id, prefer_surreal=False)
+    assert out["backend"] == "fallback"
+    assert out["found"] is True
+    assert out["scenario_trace"]["run_id"] == run_id
+
+
+def test_scenario_surreal_reader_prefers_surreal_when_available(tmp_path):
+    from scenario_research.linkml_surreal import ScenarioSurrealReader
+
+    class FakeSurreal:
+        def is_healthy(self):
+            return True
+
+        def query_rows(self, sql: str):
+            if "FROM ScenarioTrace" in sql:
+                return [{"run_id": "run-surreal-read", "period": 2, "live_business_context_ref": "ctx-1"}]
+            if "FROM Attribution" in sql:
+                return [{"run_id": "run-surreal-read", "policy_id": "run-surreal-read:1"}]
+            if "FROM LiveBusinessContext:ctx-1" in sql:
+                return [{"signals": {"run_id": "run-surreal-read"}}]
+            return []
+
+    reader = ScenarioSurrealReader(surreal=FakeSurreal(), fallback_dir=tmp_path / "sf")  # type: ignore[arg-type]
+    out = reader.get_run_artifacts("run-surreal-read", prefer_surreal=True)
+    assert out["backend"] == "surreal"
+    assert out["found"] is True
+    assert out["scenario_trace"]["run_id"] == "run-surreal-read"
+    assert len(out["attributions"]) == 1
+
+
+def test_cli_artifacts_impl_fetches_payload(tmp_path, monkeypatch):
+    import json
+    import scenario_research.cli as cli_mod
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-cli-artifacts"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps({"records": {"scenario_trace": {"run_id": run_id}, "attributions": [], "live_business_context": {}}})
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._artifacts_impl(run_id, prefer_surreal=False)
+    assert captured["payload"]["found"] is True
+    assert captured["payload"]["scenario_trace"]["run_id"] == run_id
+
+
+def test_query_run_attributions_filters_and_aggregate(tmp_path, monkeypatch):
+    import json
+    from scenario_research.linkml_surreal import query_run_attributions
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-attribution-query"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id, "period": 4},
+                    "attributions": [
+                        {"run_id": run_id, "period": 1, "level": "policy", "cost": 3.0, "delta": 0.01},
+                        {"run_id": run_id, "period": 2, "level": "policy", "cost": 5.0, "delta": -0.02},
+                        {"run_id": run_id, "period": 3, "level": "ops", "cost": 2.0, "delta": 0.03},
+                    ],
+                    "live_business_context": {},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    out = query_run_attributions(
+        run_id,
+        period_min=2,
+        period_max=3,
+        level="policy",
+        aggregate="sum_cost_by_level",
+        prefer_surreal=False,
+    )
+    assert out["found"] is True
+    assert out["count"] == 1
+    assert out["rows"][0]["period"] == 2
+    assert out["aggregate"]["kind"] == "sum_cost_by_level"
+    assert out["aggregate"]["buckets"]["policy"]["sum_cost"] == 5.0
+
+
+def test_cli_attributions_impl_fetches_and_aggregates(tmp_path, monkeypatch):
+    import json
+    import scenario_research.cli as cli_mod
+
+    fb = tmp_path / "sf"
+    fb.mkdir(parents=True, exist_ok=True)
+    run_id = "run-cli-attributions"
+    (fb / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "scenario_trace": {"run_id": run_id},
+                    "attributions": [
+                        {"run_id": run_id, "period": 1, "level": "policy", "cost": 4.0, "delta": 0.05}
+                    ],
+                    "live_business_context": {},
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(fb))
+    captured: dict[str, dict] = {}
+
+    def _capture(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(cli_mod, "print", _capture)
+    cli_mod._attributions_impl(
+        run_id,
+        period_min=1,
+        period_max=1,
+        level="policy",
+        aggregate="sum_delta_by_period",
+        prefer_surreal=False,
+    )
+    assert captured["payload"]["count"] == 1
+    assert captured["payload"]["aggregate"]["kind"] == "sum_delta_by_period"
+
+
+def test_build_research_report_pipeline_produces_report_artifact(tmp_path, monkeypatch):
+    import asyncio
+    from pathlib import Path
+    from scenario_research.research_pipeline import build_research_report
+
+    monkeypatch.setenv("SCENARIO_RESEARCH_REPORT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("SCENARIO_SURREAL_FALLBACK_DIR", str(tmp_path / "sf"))
+    report, meta = asyncio.run(
+        build_research_report(
+            question="How do we improve billable utilization?",
+            seed=9,
+            trace_id="trace-test-1",
+        )
+    )
+    assert report.report_path
+    rp = Path(report.report_path)
+    assert rp.exists()
+    text = rp.read_text()
+    assert "Scenario Research Report" in text
+    assert report.scenario_runs
+    assert report.fits
+    assert report.cost_report is not None
+    assert meta["persistence"]["records_written"] >= 2
+
+
+def test_schema_reconcile_plan_adds_only_missing_entities():
+    from pathlib import Path
+    from scenario_research.linkml_surreal import plan_schema_reconcile
+
+    linkml = Path(__file__).resolve().parents[1] / "ontology" / "memory" / "linkml_data_model.yaml"
+    existing = {
+        "tables": {
+            "MemoryItem": {
+                "fields": {"id": {"type": "string"}, "content": {"type": "string"}},
+                "indexes": {"MemoryItem_id_uniq": {}},
+            }
+        }
+    }
+    plan = plan_schema_reconcile(linkml, existing_schema=existing, namespace="odrs", database="memory")
+    assert plan["has_changes"] is True
+    assert "ScenarioTrace" in plan["missing"]["tables"]
+    assert "Attribution" in plan["missing"]["tables"]
+    assert "DEFINE TABLE IF NOT EXISTS ScenarioTrace SCHEMAFULL;" in plan["sql"]
+    assert "DEFINE TABLE IF NOT EXISTS MemoryItem SCHEMAFULL;" not in plan["sql"]
 
