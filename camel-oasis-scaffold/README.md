@@ -48,6 +48,7 @@ camel-oasis-scaffold/
 │       ├── opinion_dynamics.yaml
 │       └── marketing_ab.yaml
 ├── src/
+│   ├── camel_sim/             # Multi-scenario service: schemas, actions, runner, Modal hooks
 │   ├── model_factory.py      # Build CAMEL ChatAgent models from configs/models.yaml
 │   ├── scenarios/
 │   │   ├── info_spread.py    # OASIS sim: a seed post, observe cascade
@@ -74,6 +75,8 @@ camel-oasis-scaffold/
 │   ├── setup_mlx.sh          # Install MLX + pull a quantized model
 │   ├── setup_ollama.sh
 │   └── serve_local.sh        # Start mlx_lm.server on localhost:8080
+├── examples/
+│   └── multi_scenarios.json  # Editable CAMEL multi-scenario batch example
 ├── data/                     # OASIS profile JSONs + simulation .db outputs
 ├── pyproject.toml
 └── README.md
@@ -108,6 +111,40 @@ python -m src.cli ask "If we seed a narrative on Reddit with 5 popular accounts 
 ```
 
 See `notebooks/` for step-by-step walkthroughs.
+
+## CAMEL multi-scenario service
+
+The `src.camel_sim` package implements the CAMEL-AI multi-scenario service
+shape used for scheduling, research, negotiation, and social-dynamics runs.
+It has two execution paths:
+
+- `local`: deterministic, dependency-light action execution for fast CLI checks.
+- `camel`: CAMEL `ChatAgent` + `FunctionTool` execution using configured model
+  backends, including optional Modal/SGLang endpoints.
+
+Create and run an editable scenario batch locally:
+
+```bash
+python -m src.cli multi-scenario-example --output data/multi_scenarios.json
+python -m src.cli multi-scenario examples/multi_scenarios.json \
+  --execution-mode local \
+  --output-dir data/camel_sim_results
+```
+
+From the co-located MCP/CLI wrapper:
+
+```bash
+cd ../mcp-servers/scenario-research
+uv run scenario-research multi-run ../../camel-oasis-scaffold/examples/multi_scenarios.json
+```
+
+For Modal/SGLang deployment, install the optional extra and run the Modal
+entrypoint:
+
+```bash
+uv pip install -e ".[modal,parquet]"
+modal run src.camel_sim.modal_app --scenario-file examples/multi_scenarios.json
+```
 
 ## Why this stack
 

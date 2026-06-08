@@ -1,0 +1,56 @@
+[
+  {
+    "id": "contract_001",
+    "name": "Two-party service contract negotiation",
+    "description": "A buyer and seller negotiate a 12-month SaaS contract",
+    "max_ticks": 4,
+    "termination_condition": "any_contract_accepted",
+    "parameters": {
+      "contract_terms": {
+        "price_usd": 50000,
+        "term_months": 12,
+        "payment": "annual prepay"
+      }
+    },
+    "agents": [
+      {
+        "id": "buyer_1",
+        "role": "buyer",
+        "domain": "negotiation",
+        "persona": "You are a procurement manager seeking maximum cost efficiency."
+      },
+      {
+        "id": "seller_1",
+        "role": "seller",
+        "domain": "negotiation",
+        "persona": "You are a sales director aiming for a durable customer relationship."
+      }
+    ]
+  },
+  {
+    "id": "research_001",
+    "name": "Research synthesis challenge",
+    "description": "Researchers collect and cross-check claims about a market trend",
+    "max_ticks": 3,
+    "termination_condition": "finding_threshold",
+    "parameters": {
+      "claim": "The market is shifting toward hybrid open-source/frontier agent stacks.",
+      "evidence": ["survey_notes", "usage_logs"],
+      "finding_threshold": 1
+    },
+    "agents": [
+      {
+        "id": "researcher_1",
+        "role": "primary researcher",
+        "domain": "research",
+        "persona": "You collect evidence and produce cautious claims."
+      },
+      {
+        "id": "reviewer_1",
+        "role": "peer reviewer",
+        "domain": "research",
+        "persona": "You cite or challenge findings based on evidence quality."
+      }
+    ]
+  }
+]

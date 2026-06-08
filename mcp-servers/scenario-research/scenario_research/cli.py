@@ -12,6 +12,7 @@ import typer
 from rich import print
 
 import asyncio
+from pathlib import Path
 
 from . import __version__
 from .models import ScenarioRun
@@ -45,6 +46,45 @@ def run(
         execute_scenario(scenario, n_steps=steps, seed=seed)
     )
     print(r.model_dump())
+
+
+@app.command("multi-run")
+def multi_run(
+    scenario_file: Path = typer.Argument(..., help="JSON object or array of CAMEL ScenarioConfig objects."),
+    output_dir: Path | None = typer.Option(
+        None,
+        help="Output directory for event and summary artifacts.",
+    ),
+    execution_mode: str = typer.Option(
+        "local",
+        help="local for deterministic CLI runs, camel for configured CAMEL model backends.",
+    ),
+    output_format: str = typer.Option("jsonl", help="jsonl | json | parquet"),
+    parallel: bool = typer.Option(False, help="Run scenarios concurrently in local mode."),
+) -> None:
+    """Run the CAMEL multi-scenario service via the co-located scaffold."""
+    root = get_scaffold_root()
+    if output_dir is None:
+        output_dir = root / "data" / "camel_sim_results"
+
+    from src.camel_sim.config.scenarios import load_scenario_configs  # type: ignore
+    from src.camel_sim.results.collector import write_results  # type: ignore
+    from src.camel_sim.simulation.runner import run_scenarios  # type: ignore
+
+    configs = load_scenario_configs(scenario_file)
+    results = run_scenarios(configs, execution_mode=execution_mode, parallel=parallel)
+    artifacts = write_results(
+        results,
+        output_dir,
+        output_format=output_format,  # type: ignore[arg-type]
+    )
+    print(
+        {
+            "scenarios": len(results),
+            "execution_mode": execution_mode,
+            "artifacts": artifacts,
+        }
+    )
 
 
 @app.command()

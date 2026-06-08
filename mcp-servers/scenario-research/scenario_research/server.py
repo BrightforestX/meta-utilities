@@ -96,6 +96,34 @@ async def run_scenario(
 
 
 @mcp.tool()
+async def run_multi_scenario(
+    scenario_configs: list[dict[str, Any]],
+    execution_mode: str = "local",
+    parallel: bool = False,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Run CAMEL multi-scenario configs through the co-located scaffold.
+
+    Local mode is deterministic and does not require GPUs or API keys. CAMEL mode
+    uses the scaffold's model routing and should be paired with configured model
+    backends or Modal/SGLang endpoints.
+    """
+    get_scaffold_root()
+    from src.camel_sim.simulation.runner import run_scenarios  # type: ignore
+
+    results = run_scenarios(
+        scenario_configs,
+        execution_mode=execution_mode,
+        parallel=parallel,
+    )
+    return {
+        "scenarios": len(results),
+        "execution_mode": execution_mode,
+        "results": results,
+    }
+
+
+@mcp.tool()
 async def ask(question: str, seed: int | None = 42, ctx: Context | None = None) -> ResearchReport:
     """(P4 flow) End-to-end ask delegating to scaffold workforce when available.
 

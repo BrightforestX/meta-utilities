@@ -34,5 +34,6 @@ def get_timeout_seconds() -> float:
 LONG_RUNNING_TOOLS: list[str] = [
     "scenario_research_health",  # short
     "run_scenario",
+    "run_multi_scenario",
     # future: "ask", "fit_models", "execute_replicate_batch" etc.
 ]

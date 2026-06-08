@@ -64,5 +64,54 @@ def ask(question: str):
     print(result.result)
 
 
+@app.command("multi-scenario-example")
+def multi_scenario_example(
+    output: Path = typer.Option(
+        DATA_DIR / "multi_scenarios.example.json",
+        help="Where to write the example scenario JSON.",
+    ),
+) -> None:
+    """Write an editable CAMEL multi-scenario config file."""
+    from src.camel_sim.config.scenarios import write_example_scenario
+
+    path = write_example_scenario(output)
+    print({"wrote": str(path)})
+
+
+@app.command("multi-scenario")
+def multi_scenario(
+    scenario_file: Path = typer.Argument(..., help="JSON object or array of ScenarioConfig objects."),
+    output_dir: Path = typer.Option(
+        DATA_DIR / "camel_sim_results",
+        help="Directory for event and summary artifacts.",
+    ),
+    execution_mode: str = typer.Option(
+        "local",
+        help="local for deterministic CLI runs, camel for configured CAMEL model backends.",
+    ),
+    output_format: str = typer.Option("jsonl", help="jsonl | json | parquet"),
+    parallel: bool = typer.Option(False, help="Run scenarios concurrently in local mode."),
+) -> None:
+    """Run CAMEL multi-scenario simulations from a JSON config file."""
+    from src.camel_sim.config.scenarios import load_scenario_configs
+    from src.camel_sim.results.collector import write_results
+    from src.camel_sim.simulation.runner import run_scenarios
+
+    configs = load_scenario_configs(scenario_file)
+    results = run_scenarios(configs, execution_mode=execution_mode, parallel=parallel)
+    artifacts = write_results(
+        results,
+        output_dir,
+        output_format=output_format,  # type: ignore[arg-type]
+    )
+    print(
+        {
+            "scenarios": len(results),
+            "execution_mode": execution_mode,
+            "artifacts": artifacts,
+        }
+    )
+
+
 if __name__ == "__main__":
     app()
