@@ -99,6 +99,10 @@ def get_embedder(dim: int = 384):
         def simple_hash_embedding_local(text: str, dim: int = dim) -> "np.ndarray":  # type: ignore
             return simple_hash_embedding(text, dim=dim)
 
+        # Expose the canonical fallback name (callers/tests identify the fallback by this name).
+        # We only relabel __name__ (not the def) to avoid the enclosing-scope rebinding that would
+        # turn the inner `simple_hash_embedding(...)` call into infinite recursion.
+        simple_hash_embedding_local.__name__ = "simple_hash_embedding"
         return simple_hash_embedding_local
 
 

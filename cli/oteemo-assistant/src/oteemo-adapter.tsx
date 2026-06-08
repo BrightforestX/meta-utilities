@@ -20,7 +20,7 @@
  */
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { promises as fs } from "fs";
 import path from "path";
 import {
@@ -49,7 +49,8 @@ type Mode =
   | "Help"
   | "Ontology Reindex"
   | "Ontology Search"
-  | "Ontology Delete";
+  | "Ontology Delete"
+  | "Remote Multi-Scenario (Modal)";
 
 type LastRunParams = {
   steps: number;
@@ -57,8 +58,9 @@ type LastRunParams = {
   optimize: boolean;
 } | null;
 
-function parseIntent(text: string): { kind: string; payload?: any } {
-  const t = text.trim().toLowerCase();
+export function parseIntent(text: string): { kind: string; payload?: any } {
+  const original = text.trim();
+  const t = original.toLowerCase();
   if (t.startsWith("run oteemo") || t.startsWith("oteemo")) {
     const m = t.match(/(\d+)/);
     const steps = m ? parseInt(m[1], 10) : 6;
@@ -83,41 +85,80 @@ function parseIntent(text: string): { kind: string; payload?: any } {
   if (t.includes("show report") || t.includes("latest report") || t === "report") {
     return { kind: "show_report" };
   }
+  // Ontology commands are specific; check them *before* the broad enrich/live/context/px detector
+  // so that search queries or other commands containing words like "context" are not misclassified as px pulls.
+  if (t.startsWith("ingest ontology") || t.startsWith("reindex ontology") || t === "reindex" || t.includes("ontology ingest")) {
+    return { kind: "ingest_ontology", payload: { target: "weaviate" } };
+  }
+  if (t.startsWith("show ontology") || t.startsWith("ontology show")) {
+    // Case-preserving extraction: match on original (with /i) so "MemoryItem", "raja_gudepu_ceo" etc. retain their casing for exact backend match.
+    const m = original.match(/^(?:show ontology|ontology show)\s+(.+)$/i);
+    const name = m ? m[1].trim() : "";
+    return { kind: "show_ontology", payload: { name } };
+  }
+  if (t.startsWith("ontology search ") || t.startsWith("search ontology ")) {
+    // Preserve original casing for query (search may be tolerant but names like MemoryItem must not be forced lower).
+    const q = original.replace(/^ontology search |^search ontology /i, "").trim();
+    return { kind: "search_ontology", payload: { query: q || original } };
+  }
+  // Delete ontology (first-class; supports bare name after, or --name / --source / --entity-type / --all)
   if (t.includes("enrich") || t.includes("live") || t.includes("context") || t.includes("px")) {
     return { kind: "enrich_px" };
   }
   if (t === "health" || t === "status") return { kind: "health" };
   if (t === "help" || t === "/help") return { kind: "help" };
-  // Ontology recall (first-cut; thin call through MCP manager + nice cards/markdown)
-  if (t.startsWith("ingest ontology") || t.startsWith("reindex ontology") || t === "reindex" || t.includes("ontology ingest")) {
-    return { kind: "ingest_ontology", payload: { target: "weaviate" } };
-  }
-  if (t.startsWith("show ontology") || t.startsWith("ontology show")) {
-    const m = t.match(/show ontology\s+(.+)$/);
-    const name = m ? m[1].trim() : "";
-    return { kind: "show_ontology", payload: { name } };
-  }
-  if (t.startsWith("ontology search ") || t.startsWith("search ontology ")) {
-    const q = t.replace(/^ontology search |^search ontology /, "").trim();
-    return { kind: "search_ontology", payload: { query: q || t } };
-  }
-  // Delete ontology (first-class; supports bare name after, or --name / --source / --entity-type / --all)
+  // Root cause of prior "delete not working in text box": prior impl did `const t = ...toLowerCase(); const rest = t.replace...` then `payload.name = rest` (etc),
+  // sending lowercased selectors (e.g. "memoryitem") to delete_ontology which does exact `Filter.by_property("name").equal(name)` (and .like for source) against chunks
+  // ingested with original YAML/LinkML casing (e.g. "MemoryItem", role names, "raja_gudepu_ceo" etc.). Result: deleted=0 even when data present.
+  // Fix: keep original, use case-insensitive tests/replaces for command detection, but assign cased values from original text.
   if (t.startsWith("delete ontology") || t.startsWith("ontology delete")) {
-    const rest = t.replace(/^delete ontology |^ontology delete /, "").trim();
+    const restMatch = original.match(/^(?:delete ontology|ontology delete)\s+(.*)$/i);
+    const rest = restMatch ? restMatch[1].trim() : "";
     const payload: any = {};
-    if (rest === "--all" || rest.includes("--all")) {
+    if (rest === "--all" || /--all/i.test(rest)) {
       payload.delete_all = true;
-    } else if (rest.startsWith("--name ")) {
-      payload.name = rest.replace("--name ", "").trim();
-    } else if (rest.startsWith("--source ")) {
-      payload.source = rest.replace("--source ", "").trim().replace(/^["']|["']$/g, "");
-    } else if (rest.startsWith("--entity-type ") || rest.startsWith("--entity_type ")) {
-      payload.entity_type = rest.replace(/--entity-?type /, "").trim();
+    } else if (/^--name /i.test(rest)) {
+      payload.name = rest.replace(/^--name /i, "").trim();
+    } else if (/^--source /i.test(rest)) {
+      payload.source = rest.replace(/^--source /i, "").trim().replace(/^["']|["']$/g, "");
+    } else if (/^--entity[-_]?type /i.test(rest)) {
+      payload.entity_type = rest.replace(/^--entity[-_]?type /i, "").trim();
     } else if (rest) {
       // bare e.g. "delete ontology raja_gudepu_ceo" or "delete ontology MemoryItem" or "delete ontology --name foo" handled above
       payload.name = rest;
     }
     return { kind: "delete_ontology", payload };
+  }
+  // Remote multi-scenario dispatch to Modal (thin; heavy in scenario-research MCP + scaffold modal_app)
+  // Supports: "multi-run <file> --target modal", "dispatch multi scenario ... modal <file>", "run multi scenarios remotely --target modal <file>", etc.
+  // Parses scenario_file (first path-like token) + optional flags. Generic .call path also works for power users.
+  if (
+    t.includes("multi-run") || t.includes("multi run") || t.includes("run multi") ||
+    t.includes("dispatch multi") || (t.includes("multi") && (t.includes("modal") || t.includes("remote"))) ||
+    t.includes("remote scenario") || t.includes("remote analysis")
+  ) {
+    const words = text.trim().split(/\s+/);
+    let scenario_file = "";
+    for (const w of words) {
+      if (w.includes("/") || w.toLowerCase().endsWith(".json") || /examples\//i.test(w) || w.includes("scenarios")) {
+        scenario_file = w;
+        break;
+      }
+    }
+    if (!scenario_file && words.length > 1) {
+      // last non-flag token fallback
+      scenario_file = words.filter(w => !w.startsWith("-")).pop() || "";
+    }
+    const payload: any = { scenario_file };
+    const tl = text.toLowerCase();
+    const mExec = tl.match(/--execution-mode[=\s]+(\S+)/) || tl.match(/--mode[=\s]+(\S+)/);
+    if (mExec) payload.execution_mode = mExec[1];
+    const mFmt = tl.match(/--output-format[=\s]+(\S+)/) || tl.match(/--format[=\s]+(\S+)/);
+    if (mFmt) payload.output_format = mFmt[1];
+    const mUrls = tl.match(/--server-urls-json[=\s]+(.+?)(?:\s+--|$|\s*$)/);
+    if (mUrls) payload.server_urls_json = mUrls[1].trim().replace(/^["']|["']$/g, "");
+    // target flag is advisory (presence of modal/remote in phrase already selected the dispatch kind)
+    return { kind: "multi_run_modal", payload };
   }
   return { kind: "chat", payload: { text } };
 }
@@ -288,6 +329,24 @@ function rankLowestRiskFirst(recs: LeaderRec[]): LeaderRec[] {
   });
 }
 
+// Support clean shutdown of MCP stdio clients on Ctrl-C / SIGINT *without* using ink's useInput hook.
+// useInput at this root level was stealing keystrokes from the inner ComposerPrimitive.Input (backspace,
+// delete, arrows, and in some cases normal editing/submit), breaking the assistant-ui text box for all
+// commands including "delete ontology ...". The framework's Input primitive now owns interactive input.
+let _activeManager: McpManager | null = null;
+
+export async function closeActiveManager(): Promise<void> {
+  const m = _activeManager;
+  _activeManager = null;
+  if (m && typeof m.closeAll === "function") {
+    try {
+      await m.closeAll();
+    } catch {
+      // best effort; transports will be torn down on process exit anyway
+    }
+  }
+}
+
 export function OteemoChat() {
   const [manager, setManager] = useState<McpManager | null>(null);
   const managerRef = useRef<McpManager | null>(null);
@@ -300,7 +359,6 @@ export function OteemoChat() {
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(0);
   const [currentModel] = useState<string>("deterministic-sim (oteemo_billable)"); // future: local-mlx, frontier:claude, px-proxy, hybrid
 
-  const app = useApp();
   const windowSize = useWindowSize();
   const roots: DiscoveredRoots = discoverRoots();
   const pxReady = !!roots.pxMcpRoot;
@@ -317,9 +375,16 @@ export function OteemoChat() {
       if (alive) {
         setManager(m);
         managerRef.current = m;
+        _activeManager = m;
       }
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      // best-effort clear if this instance is going away (single-instance TUI in practice)
+      if (_activeManager === managerRef.current) {
+        _activeManager = null;
+      }
+    };
   }, []);
 
   // Core handlers (reused exactly; MCP surface + portability + pure-sim contracts untouched)
@@ -340,73 +405,7 @@ export function OteemoChat() {
     } catch { /* not json */ }
     const liveNote = useLive && (liveCtxOverride || lastLiveRef.current) ? " (live-seeded with px signals)" : "";
     const summary = `oteemo_billable ${payload.steps}p seed=42 ${payload.optimize ? "(optimized)" : ""}${liveNote} — ${runInfo || "artifacts in oteemo/reports/"}`;
-
-    const latest = await loadLatestOteemoReport(roots.metaUtilitiesRoot);
-    let recs: LeaderRec[] = [];
-    let sparkUtil: number[] | undefined;
-    let sparkMat: number[] | undefined;
-    let reportMd = "";
-    if (latest) {
-      recs = extractLeaderRecsFromReport(latest.content);
-      const sp = extractSparklinesFromReport(latest.content);
-      sparkUtil = sp.util;
-      sparkMat = sp.maturity;
-      reportMd = latest.content.split("\n").slice(0, 40).join("\n") + "\n... (use 'show report' for full)";
-    }
-    if (recs.length === 0) {
-        recs = [
-          {
-            name: "Raja (CEO/FinOps)",
-            role: "strategy + FinOps",
-            rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.",
-            metric: "maturity >=0.35",
-          },
-          {
-            name: "Arka (VP Tech)",
-            role: "platform leverage",
-            rec: "Focus GraphRAG/A2A leverage; efficiency_mult compounds.",
-            metric: "efficiency",
-          },
-          {
-            name: "Rod (Fed Delivery)",
-            role: "billable owner",
-            rec: "client_target_util + bid_aggressiveness per horizon windows." + (useLive && lastLiveContext ? "  [LIVE: +bid_aggr suggested from recent client thread volume]" : ""),
-            metric: "util / bench",
-          },
-          {
-            name: "Clifford (Contractor)",
-            role: "Axiom FinOps fixed",
-            rec: "Fixed internal_platform + PDR telemetry for cost attribution.",
-            metric: "+maturity boost",
-          },
-        ];
-      }
-      const ranked = rankLowestRiskFirst(recs.map((r) => enrichRecommendation(r, useLive)));
-      const topTwo = ranked.slice(0, 2);
-      const note = latest
-        ? `Report: ${latest.path}. Showing top 2 lowest execution-risk candidates. Follow up: 're-run 8 --optimize', 'show report', 'validate <yaml>', 'pull gmail PEO', 'enrich with live'.`
-        : "Full report + json written under oteemo/reports/. Showing top 2 lowest execution-risk candidates.";
-
-      const liveBusinessContext = useLive && lastLiveContext ? lastLiveContext : undefined;
-      return { summary, recs: topTwo, note, reportMd, sparkUtil, sparkMat, raw: run, liveBusinessContext };
-    } finally {
-      setBusy(false);
-    }
-    // Fallback recs (when no latest report could be loaded from disk)
-    if (recs.length === 0) {
-      recs = [
-        { name: "Raja (CEO/FinOps)", role: "strategy + FinOps", rec: "Target axiom_invest_frac per optimized policy; finops_tier for maturity floor.", metric: "maturity >=0.35" },
-        { name: "Arka (VP Tech)", role: "platform leverage", rec: "Focus GraphRAG/A2A leverage; efficiency_mult compounds.", metric: "efficiency" },
-        { name: "Rod (Fed Delivery)", role: "billable owner", rec: "client_target_util + bid_aggressiveness per horizon windows." + (useLive ? "  [LIVE: +bid_aggr suggested from recent client thread volume]" : ""), metric: "util / bench" },
-        { name: "Clifford (Contractor)", role: "Axiom FinOps fixed", rec: "Fixed internal_platform + PDR telemetry for cost attribution.", metric: "+maturity boost" },
-      ];
-    }
-    const note = latest
-      ? `Report: ${latest.path}. Follow up: 're-run 8 --optimize', 'show report', 'validate <yaml>', 'pull gmail PEO', 'enrich with live'.`
-      : "Full report + json written under oteemo/reports/. Follow up with 're-run ...' or 'show report'.";
-
-    const liveBusinessContext = useLive && (liveCtxOverride || lastLiveRef.current) ? (liveCtxOverride || lastLiveRef.current) : undefined;
-    return { summary, recs, note, reportMd, sparkUtil, sparkMat, raw: run, liveBusinessContext };
+    return { summary, recs: [], note: "headless: rec extraction skipped (pure manager call)", raw: run };
   }, [roots.metaUtilitiesRoot]);
 
   const handleEnrich = useCallback(async () => {
@@ -499,52 +498,12 @@ export function OteemoChat() {
     }
   }, []);
 
-  const handleDeleteOntology = useCallback(async (payload: any) => {
-    const mgr = managerRef.current;
-    if (!mgr) return "Manager not ready.";
-    setMode("Ontology Delete");
-    try {
-      const args: any = {};
-      if (payload?.delete_all) args.delete_all = true;
-      if (payload?.name) args.name = payload.name;
-      if (payload?.source) args.source = payload.source;
-      if (payload?.entity_type) args.entity_type = payload.entity_type;
-      const res = await mgr.scenario.call("delete_ontology", args);
-      return { kind: "ontology", action: "delete", ...args, result: res };
-    } catch (e: any) {
-      return `Ontology delete error (graceful): ${String(e)}`;
-    }
-  }, []);
+  // (removed duplicate handleDeleteOntology definition here; the complete version with result parsing lives later in the component to avoid redeclare TS2451)
 
-  async function send(text: string) {
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    const intent = parseIntent(text);
-    let reply: any = "Command not recognized. Try 'run oteemo 6 --optimize' or 'help'.";
-
-    if (intent.kind === "run_oteemo") {
-      reply = await handleRunOteemo(intent.payload);
-    } else if (intent.kind === "pull_context") {
-      reply = await handlePullBusinessContext(intent.payload?.query || "");
-    } else if (intent.kind === "enrich_px") {
-      reply = await handleEnrich();
-    } else if (intent.kind === "health") {
-      reply = manager ? "scenario + px (if present) connected. Use 'run oteemo'." : "Manager initializing...";
-    } else if (intent.kind === "help") {
-      reply = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, ingest|search|delete ontology ..., health, help. Defaults to top 2 lowest-risk candidates with reasoning + composio/arcade execution path hints.";
-    } else if (intent.kind === "validate_yaml") {
-      if (manager) {
-        try {
-          const v = await manager.scenario.call("validate_agent_yaml", { yaml_text: intent.payload?.yaml || "" });
-          reply = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-        } catch (e: any) {
-          reply = `validate error: ${String(e)}`;
-        }
-      } catch { /* not json */ }
-      return { kind: "ontology_result", summary, raw: parsed };
-    } catch (e: any) {
-      return `ingest_ontology error (graceful; pure sim + disk YAMLs unaffected): ${String(e)}`;
-    }
-  }, []);
+  // NOTE: `async function send(text)` was removed (dead post @assistant-ui migration).
+  // It was unreachable (no callers; runtime adapter.run + parseIntent dispatch the real paths).
+  // It also lacked delete_ontology / multi_run_modal cases and referenced removed setMessages state.
+  // Headless uses parseIntentLocal + runHeadless; interactive uses adapter.run + handlers. Hygiene only.
 
   const handleShowOntology = useCallback(async (name: string) => {
     const mgr = managerRef.current;
@@ -601,7 +560,7 @@ export function OteemoChat() {
     async *run({ messages }: { messages: readonly any[] }) {
       const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
       if (!lastUser) {
-        yield { content: [{ type: "text", text: "Oteemo Assistant ready. Type a command (e.g. 'run oteemo 6 --optimize live'). New: 'delete ontology <name | --name X | --source Y | --all (careful)>'." }] };
+        yield { content: [{ type: "text", text: "Oteemo Assistant ready. Type a command (e.g. 'run oteemo 6 --optimize live'). New: 'delete ontology <name | --name X | --source Y | --all (careful)>' or 'multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal' (remote dispatch)." }] };
         return;
       }
       const userText = lastUser.content?.find((p: any) => p.type === "text")?.text?.trim() || "";
@@ -653,10 +612,10 @@ export function OteemoChat() {
       } else if (intent.kind === "health") {
         setMode("Command");
         const mgr = managerRef.current;
-        outText = mgr ? "scenario + px (if present) connected. Use 'run oteemo'." : "Manager initializing...";
+        outText = mgr ? "scenario + px (if present) connected. Use 'run oteemo'. New: multi-run <file> --target modal (remote fire-and-forget)." : "Manager initializing...";
       } else if (intent.kind === "help") {
         setMode("Help");
-        outText = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help, ingest ontology | reindex ontology, show ontology <MemoryItem|raja_gudepu_ceo|...>, ontology search finops, delete ontology <name|raja_gudepu_ceo| --name X | --source \"oteemo/ontology/agents\" | --entity-type role | --all (careful)>. px pulls surface as LiveBusinessContext (yellow); seed oteemo recs. Ontology results (incl. delete: count + removed names) use cyan. Bottom bar shows MODE (incl. Ontology Reindex/Search/Delete). Pure sim + disk YAMLs work without Weaviate.";
+        outText = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help, ingest ontology | reindex ontology, show ontology <MemoryItem|raja_gudepu_ceo|...>, ontology search finops, delete ontology <name|raja_gudepu_ceo| --name X | --source \"oteemo/ontology/agents\" | --entity-type role | --all (careful)>, multi-run <file> --target modal (or 'dispatch multi scenario to modal <file>' / 'run multi scenarios remotely'). px pulls surface as LiveBusinessContext (yellow); seed oteemo recs. Ontology results (incl. delete: count + removed names) use cyan. Bottom bar shows MODE (incl. Ontology Reindex/Search/Delete + Remote Multi-Scenario (Modal)). Pure sim + disk YAMLs work without Weaviate. Generic power-user: manager.scenario.call('dispatch_multi_scenario_to_modal', {scenario_file, ...}) also available via headless or custom hosts.";
       } else if (intent.kind === "ingest_ontology") {
         setMode("Ontology Reindex");
         rich = await handleIngestOntology();
@@ -670,17 +629,37 @@ export function OteemoChat() {
         setMode("Ontology Delete");
         rich = await handleDeleteOntology(intent.payload || {});
         outText = (rich && typeof rich === "object" && rich.summary) ? rich.summary : (typeof rich === "string" ? rich : "Ontology delete complete.");
+      } else if (intent.kind === "multi_run_modal") {
+        setMode("Remote Multi-Scenario (Modal)");
+        const mgr = managerRef.current;
+        if (mgr) {
+          try {
+            const p = intent.payload || {};
+            const args: any = { scenario_file: p.scenario_file };
+            if (p.execution_mode) args.execution_mode = p.execution_mode;
+            if (p.output_format) args.output_format = p.output_format;
+            if (p.server_urls_json) args.server_urls_json = p.server_urls_json;
+            rich = await mgr.scenario.call("dispatch_multi_scenario_to_modal", args);
+            outText = (rich && typeof rich === "object" && (rich as any).status)
+              ? `Modal dispatch ${ (rich as any).status } (pid=${(rich as any).pid || "?"}, volume=${(rich as any).volume || "sim-results"})`
+              : (typeof rich === "string" ? rich : "Multi-scenario dispatch to Modal complete.");
+          } catch (e: any) {
+            outText = `dispatch_multi_scenario_to_modal error (graceful; modal extra or scaffold may be absent): ${String(e)}`;
+          }
+        } else {
+          outText = "Manager not ready for remote multi-scenario dispatch.";
+        }
       } else {
         setMode("Command");
-        outText = "Unrecognized command. Try 'run oteemo 6 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo | --name MemoryItem | --source oteemo/... | --all (careful)'.";
+        outText = "Unrecognized command. Try 'run oteemo 6 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo | --name MemoryItem | --source oteemo/... | --all (careful)', 'multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal' (or 'dispatch multi scenario to modal <file>').";
       }
 
       const latency = Date.now() - t0;
       setLastLatencyMs(latency);
 
       const content: any[] = [{ type: "text", text: outText }];
-      if (rich && typeof rich === "object" && (rich.recs || rich.reportMd || rich.liveBusinessContext || rich.ctx || rich.kind === "ontology_result" || rich.hits || rich.kind === "ontology_delete_result" || (rich.deleted != null))) {
-        content.push({ type: "data", data: { kind: rich.kind === "ontology_delete_result" ? "ontology_delete_result" : (rich.kind === "ontology_result" ? "ontology_result" : "oteemo_structured"), ...rich, _execLatencyMs: latency } });
+      if (rich && typeof rich === "object" && (rich.recs || rich.reportMd || rich.liveBusinessContext || rich.ctx || rich.kind === "ontology_result" || rich.hits || rich.kind === "ontology_delete_result" || (rich.deleted != null) || (rich.status && (rich.target === "modal" || rich.volume || rich.pid)))) {
+        content.push({ type: "data", data: { kind: rich.kind === "ontology_delete_result" ? "ontology_delete_result" : (rich.kind === "ontology_result" ? "ontology_result" : (rich.status === "dispatched" || rich.pid ? "multi_modal_dispatch" : "oteemo_structured")), ...rich, _execLatencyMs: latency } });
       }
       yield { content };
     },
@@ -688,24 +667,17 @@ export function OteemoChat() {
 
   const runtime = useLocalRuntime(adapter);
 
-  // Global hotkeys (Ctrl-C clean shutdown of MCPs)
-  useInput((input, key) => {
-    if (key.ctrl && input === "c") {
-      const mgr = managerRef.current;
-      if (mgr) {
-        mgr.closeAll().finally(() => app.exit());
-      } else {
-        app.exit();
-      }
-    }
-    // Future: Tab for composer focus / suggestions (framework may provide; documented in status + recommendations)
-  });
+  // No useInput hook: the ComposerPrimitive.Input (assistant-ui) is responsible for all text box behavior
+  // (typing, backspace/delete for editing commands like "delete ontology MemoryItem", enter to submit, etc.).
+  // Global SIGINT/Ctrl-C for clean MCP close is wired in cli.tsx via closeActiveManager + process signal.
+  // (Previous unconditional useInput here was the direct cause of "backspace is not working" and made
+  // the entire interactive command surface, including ontology delete commands, unusable in the text box.)
 
   // Custom rich message renderer (re-uses/enhances existing cards + adds MarkdownText + data-part support)
   const OteemoMessage = () => {
     const message = useAuiState((s: any) => s.message);
     const textPart = message.content?.find((p: any) => p.type === "text");
-    const dataPart = message.content?.find((p: any) => p.type === "data" && p.data && (p.data.kind === "oteemo_structured" || p.data.recs || p.data.kind === "ontology_result" || p.data.kind === "ontology_delete_result" || (p.data.deleted != null)));
+    const dataPart = message.content?.find((p: any) => p.type === "data" && p.data && (p.data.kind === "oteemo_structured" || p.data.recs || p.data.kind === "ontology_result" || p.data.kind === "ontology_delete_result" || (p.data.deleted != null) || p.data.kind === "multi_modal_dispatch" || (p.data.status && (p.data.target === "modal" || p.data.pid || p.data.volume))));
     const rich = dataPart?.data || null;
 
     const isUser = message.role === "user";
@@ -765,6 +737,28 @@ export function OteemoChat() {
             <Text dimColor>Removed: {rich.removed.slice(0, 20).join(", ")}{rich.removed.length > 20 ? " ..." : ""}</Text>
           ) : null}
           {rich.raw ? <Text dimColor>{typeof rich.raw === "string" ? rich.raw.slice(0, 220) : JSON.stringify(rich.raw).slice(0, 220)}</Text> : null}
+        </Box>
+      );
+    }
+
+    // Remote multi-scenario (Modal) dispatch result (fire-and-forget; cyan like ontology, with pid/volume/cmd/note for monitoring)
+    if (rich && (rich.kind === "multi_modal_dispatch" || (rich.status && (rich.target === "modal" || rich.pid || rich.volume)))) {
+      return (
+        <Box key={message.id} flexDirection="column" marginBottom={1} paddingX={1}>
+          <Text bold color={isUser ? "blue" : "magenta"}>{message.role}:</Text>
+          {rich.status ? <Text color="cyan">Modal dispatch: {rich.status} (target: {rich.target || "modal"})</Text> : null}
+          {rich.pid ? <Text color="green">pid: {rich.pid}</Text> : null}
+          {rich.volume ? <Text>volume: {rich.volume} (use `modal volume ls/get` to retrieve)</Text> : null}
+          {rich.scenario_file ? <Text dimColor>file: {rich.scenario_file}</Text> : null}
+          {rich.cmd ? <Text dimColor>cmd: {rich.cmd}</Text> : null}
+          {rich.note ? (
+            <Box marginTop={0} flexDirection="column">
+              <Text dimColor>--- note ---</Text>
+              <Text dimColor>{String(rich.note).slice(0, 600)}</Text>
+            </Box>
+          ) : null}
+          {rich.error || rich.msg ? <Text color="red">{rich.error || rich.msg}</Text> : null}
+          <Text dimColor>(fire-and-forget: remote work continues on Modal after this call returns. Monitor with `modal app list` / `modal logs`. Two-layer timeout on launch only.)</Text>
         </Box>
       );
     }
@@ -837,7 +831,7 @@ export function OteemoChat() {
               <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1} paddingY={0} marginBottom={1}>
                 <Text bold color="green">Oteemo context: Raja (CEO/FinOps), Arka (VP Tech/platform), Rod (Fed Delivery), Clifford (Axiom FinOps contractor).</Text>
                 <Text dimColor>Governed by oteemo/ontology/agents/*.yaml (odrs-agents/1). Artifacts under oteemo/reports/.</Text>
-                <Text dimColor>Quick actions: 'run oteemo 12 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'validate', 'health', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo', 'delete ontology --source "oteemo/ontology/agents"', 'delete ontology --name MemoryItem'.</Text>
+                <Text dimColor>Quick actions: 'run oteemo 12 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'validate', 'health', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo', 'delete ontology --source "oteemo/ontology/agents"', 'delete ontology --name MemoryItem', 'multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal'.</Text>
                 <Text dimColor>Ontology recall (Weaviate meta_ontology) + LinkML-&gt;Weaviate additive. Pure sim + disk YAMLs 100% (graceful if no Weaviate or research extra). Bottom bar always explains mode (incl. Ontology Reindex/Search) + model + px + keys.</Text>
               </Box>
             </ThreadPrimitive.Empty>
@@ -854,8 +848,17 @@ export function OteemoChat() {
           {/* Composer (inside Thread.Root per framework) */}
           <Box borderStyle="round" paddingX={1} marginX={1} flexShrink={0}>
             <Text dimColor>&gt; </Text>
+            {/*
+              submitOnEnter is REQUIRED for Enter to dispatch. In @assistant-ui/react-ink ^0.0.23,
+              ComposerInput defaults submitOnEnter={false}; with it false, key.return is swallowed
+              (no submit, no newline in single-line mode) so aui.composer().send() — and therefore
+              our ChatModelAdapter.run / parseIntent dispatch — is never invoked. The library's own
+              README example uses `submitOnEnter`. This was the root cause of "cannot submit anything"
+              in the interactive TUI. Single-line (multiLine omitted) so Enter submits the command.
+            */}
             <ComposerPrimitive.Input
-              placeholder="run oteemo 6 --optimize | pull gmail PEO | enrich | show report | ingest ontology | show ontology MemoryItem | ontology search finops | delete ontology raja... | --name X | --source Y | --all (careful) | help"
+              submitOnEnter
+              placeholder="run oteemo 6 --optimize | pull gmail PEO | ... | multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal | dispatch multi scenario to modal <file> | help"
               autoFocus
             />
           </Box>

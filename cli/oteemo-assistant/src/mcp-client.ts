@@ -6,6 +6,15 @@
  *
  * Two-layer timeouts: client (SCENARIO_RESEARCH_TIMEOUT_SEC etc) + host tool_timeouts.
  * Secrets for px live only in the px host process (never here).
+ *
+ * CRITICAL OUTPUT HYGIENE (interactive TUI):
+ * StdioClientTransport MUST use stderr: 'pipe' (see connectScenarioResearch).
+ * FastMCP (scenario-research-mcp) + gsd-mcp-server emit rich startup panels / lines to stderr
+ * on spawn. If these reach the real terminal while Ink owns raw mode + virtual screen, they
+ * interleave, corrupt cursor/terminal state, and break ComposerPrimitive.Input (no typing,
+ * backspace, etc. work; visible "FastMCP UI flash" symptom). We pipe + silently drain so zero
+ * child output leaks during normal interactive lifetime. (Headless also benefits: clean JSON.)
+ * Diagnostics available via DEBUG/future forwarding or direct child runs; never by default.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -41,7 +50,13 @@ export async function connectScenarioResearch(): Promise<McpHandle> {
     args,
     // Inherit env so that SCENARIO_RESEARCH_* and host tool_timeouts (if any) propagate.
     env: process.env as Record<string, string>,
-    // stderr: 'pipe' can be used for diagnostics in future.
+    // stderr: 'pipe' (NOT default/omit/'inherit') — REQUIRED to protect the parent Ink TUI.
+    // See module JSDoc for full rationale. FastMCP rich banner + gsd startup line must never
+    // reach the real controlling terminal while the assistant's ComposerPrimitive.Input is mounted.
+    // 'pipe' routes child's stderr into transport.stderr (a stream we drain silently below).
+    // This keeps Ink's raw-mode terminal control intact so backspace, text entry, Enter, etc.
+    // all work in the text box. Child output is suppressed for the interactive lifetime.
+    stderr: "pipe",
   });
 
   const client = new Client(
@@ -50,6 +65,20 @@ export async function connectScenarioResearch(): Promise<McpHandle> {
   );
 
   await client.connect(transport);
+
+  // Silent drain of the piped child stderr stream.
+  // Prevents any output from reaching process.stderr (the real terminal) during TUI use.
+  // Also avoids stream backpressure. We intentionally do NOT forward or log here.
+  // (The transport will be closed by client.close() in the handle's close path.)
+  const childStderr = (transport as any).stderr;
+  if (childStderr && typeof childStderr.on === "function") {
+    childStderr.on("data", () => {
+      /* silent: do not write to real console while Ink owns the screen */
+    });
+    childStderr.on("error", () => {
+      /* best-effort; transport close will clean up */
+    });
+  }
 
   // Best-effort: we rely on host-side tool_timeouts + client env for the two-layer contract.
   // The transport does not expose per-call timeout here; long ops are protected by the MCP host config + our wrapper.

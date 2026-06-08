@@ -43,7 +43,32 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastmcp import FastMCP, Context
-from openai import OpenAI, APIError, RateLimitError, AuthenticationError
+
+# `openai` is the live-call dependency. It is intentionally treated as optional at import
+# time so this module (and anything importing it, e.g. tests/hooks) never hard-crashes when
+# the optional dep is absent. The clear runtime error is raised only when an OpenAI-backed
+# provider path is actually exercised (see _get_client). Mirrors the repo's graceful
+# optional-dep pattern (cf. scenario-research weaviate/numpy handling).
+try:
+    from openai import OpenAI, APIError, RateLimitError, AuthenticationError
+    _OPENAI_AVAILABLE = True
+    _OPENAI_IMPORT_ERROR: str | None = None
+except Exception as _openai_exc:  # ImportError in practice; broad to stay import-safe
+    OpenAI = None  # type: ignore[assignment,misc]
+    _OPENAI_AVAILABLE = False
+    _OPENAI_IMPORT_ERROR = f"{type(_openai_exc).__name__}: {_openai_exc}"
+
+    # Define stand-in exception classes so the module's `except APIError/...` handlers
+    # remain valid (NameError-free) even when openai is not installed. These are never
+    # raised in practice when openai is missing (we fail earlier in _get_client).
+    class APIError(Exception):  # type: ignore[no-redef]
+        ...
+
+    class RateLimitError(Exception):  # type: ignore[no-redef]
+        ...
+
+    class AuthenticationError(Exception):  # type: ignore[no-redef]
+        ...
 
 
 # Deep research jobs (especially sonar-deep-research) are intentionally long-running:
@@ -88,6 +113,15 @@ def _get_client(provider: Provider) -> tuple[OpenAI, str]:
     easily run 5–20+ minutes on ambitious queries.
     """
     timeout = DEEP_RESEARCH_TIMEOUT_SEC
+
+    if not _OPENAI_AVAILABLE or OpenAI is None:
+        # Raised as ValueError so the deep_research tool catches it and returns a graceful
+        # {"error": ...} instead of crashing. Live calls genuinely require openai.
+        raise ValueError(
+            "The 'openai' package is required for live deep research calls but is not installed. "
+            "Install it with `uv pip install openai` (or `uv tool install -e .` in "
+            f"mcp-servers/deep-research). Original import error: {_OPENAI_IMPORT_ERROR}"
+        )
 
     if provider == "perplexity":
         api_key = os.getenv("PERPLEXITY_API_KEY")

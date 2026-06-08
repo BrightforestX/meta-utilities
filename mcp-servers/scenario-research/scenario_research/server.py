@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from typing import Any
 
@@ -29,7 +30,12 @@ from .observability import traced
 from .optimization.replay import replay_policy as replay_policy_robustness
 from .research_pipeline import build_research_report
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
-from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario, get_scaffold_root
+from .scaffold_adapter import (
+    dispatch_multi_scenario_to_modal as _dispatch_to_modal_impl,
+    execute_multi_scenario_configs,
+    execute_scenario,
+    get_scaffold_root,
+)
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
 
@@ -217,6 +223,115 @@ async def run_multi_scenario(
         "execution_mode": payload["execution_mode"],
         "results": payload["results"],
     }
+
+
+@mcp.tool()
+async def dispatch_multi_scenario_to_modal(
+    scenario_file: str,
+    output_format: str = "parquet",
+    execution_mode: str = "local",
+    server_urls_json: str = "",
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Kick off CAMEL multi-scenario analysis on remote Modal workers.
+
+    Thin delegation to the co-located scaffold's modal_app entrypoint (the same
+    `modal run src.camel_sim.modal_app --scenario-file ...` documented in the scaffold).
+    Uses the exact same portable discovery (get_scaffold_root + PYTHONPATH injection)
+    so no cd into the scaffold is required and no hard-coded paths are introduced.
+
+    The scenario_file string is interpreted relative to the MCP server's CWD (or
+    absolute) and resolved before passing to the Modal CLI. Hosts/agents/TUI calling
+    this tool must supply a path that is valid on the filesystem where the
+    scenario-research MCP process runs.
+
+    Kick-off semantics (fire-and-forget by design for long remote jobs): returns
+    immediately with dispatch metadata (pid, constructed cmd, volume name, monitor
+    and retrieval notes). The actual remote execution (run_scenario_remote.map over
+    the batch + write_results_remote to the "sim-results" Modal Volume) continues
+    in a detached child process.
+
+    Forwarded options:
+    - execution_mode: "local" (scripted) or "camel" (real CAMEL agents via the
+      server_urls). Modal CAMEL mode requires reachable non-localhost SGLang
+      endpoints (see modal_app.py guard).
+    - output_format: parquet (default, recommended), jsonl, json.
+    - server_urls_json: optional JSON map for custom model endpoints.
+
+    Two-layer timeout contract (documented in timeouts.py + package README):
+    - Client: SCENARIO_RESEARCH_TIMEOUT_SEC (default 1800s) caps the launch/submit
+      phase (we also honor MODAL_LAUNCH_TIMEOUT_SEC if set for this path).
+    - Host: tool_timeouts.dispatch_multi_scenario_to_modal (or the broader
+      run_multi_scenario entry). The long-running remote job itself is timed
+      and retried inside the Modal functions defined in modal_app.py (900s
+      timeout + 2 retries with backoff).
+
+    Graceful degradation:
+    - If the scaffold is not discoverable: the standard helpful RuntimeError
+      from get_scaffold_root (with CAMEL_OASIS_SCAFFOLD_ROOT guidance).
+    - If the 'modal' CLI is not on PATH in the env running the MCP server:
+      actionable message directing the user to `uv pip install -e
+      'camel-oasis-scaffold[modal,parquet]'` (into the scenario-research env)
+      + `modal token new`. Matches the style and content of the guard in
+      modal_app.py. No requirement to cd.
+    - Local and camel paths via run_multi_scenario are completely unaffected.
+
+    This keeps the MCP surface thin and "extends, does not duplicate" the
+    scaffold (all batch logic, remote mapping, volume writes, and config loading
+    stay in camel-oasis-scaffold).
+    """
+    trace = traced(
+        name="scenario_research.mcp.dispatch_multi_scenario_to_modal",
+        inputs={
+            "scenario_file": scenario_file,
+            "output_format": output_format,
+            "execution_mode": execution_mode,
+            "server_urls_json_present": bool(server_urls_json),
+        },
+        metadata={"surface": "mcp"},
+    )
+    try:
+        # Bound the *launch* action (two-layer). The remote job runs independently.
+        launch_cap = min(SCENARIO_RESEARCH_TIMEOUT_SEC, float(os.getenv("MODAL_LAUNCH_TIMEOUT_SEC", "300")))
+        try:
+            async with asyncio.timeout(launch_cap):
+                loop = asyncio.get_running_loop()
+                payload = await loop.run_in_executor(
+                    None,
+                    lambda: _dispatch_to_modal_impl(
+                        scenario_file,
+                        output_format=output_format,
+                        execution_mode=execution_mode,
+                        server_urls_json=server_urls_json,
+                    ),
+                )
+        except asyncio.TimeoutError:
+            logger.warning("dispatch_multi_scenario_to_modal launch timed out after %ss", launch_cap)
+            if ctx:
+                try:
+                    await ctx.error(f"modal dispatch launch timed out after {launch_cap}s")
+                except Exception:
+                    pass
+            trace.finalize(outputs={"scenario_file": scenario_file}, error="launch_timeout")
+            return {
+                "status": "timeout",
+                "error": "launch_timeout",
+                "timeout_sec": launch_cap,
+                "note": "The kick-off to Modal timed out. The remote job (if partially submitted) may still be running; check 'modal app list'.",
+            }
+
+        trace.record_step(
+            name="dispatch_to_modal",
+            inputs={"scenario_file": scenario_file},
+            outputs={"status": payload.get("status"), "pid": payload.get("pid"), "volume": payload.get("volume")},
+            reasoning_summary="Kicked off multi-scenario batch to remote Modal via scaffold modal_app entrypoint using portable discovery. Fire-and-forget; child continues remote execution.",
+        )
+        trace.finalize(outputs={"status": payload.get("status"), "pid": payload.get("pid")})
+        return payload
+    except Exception as exc:
+        trace.finalize(outputs={"scenario_file": scenario_file}, error=f"{type(exc).__name__}: {exc}")
+        # Re-raise so MCP hosts see the (actionable) error; graceful messages are inside the raised errors for missing modal/scaffold.
+        raise
 
 
 @mcp.tool()

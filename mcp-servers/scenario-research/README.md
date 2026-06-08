@@ -35,6 +35,11 @@ scenario-research version
 scenario-research health
 scenario-research run info_spread --agents 20 --steps 3
 scenario-research multi-run ../../camel-oasis-scaffold/examples/multi_scenarios.json
+
+# Remote Modal (kick-off; recommended unified path, portable, no cd):
+# After: uv pip install -e ".[modal]" and uv pip install -e "../../camel-oasis-scaffold[modal,parquet]"
+uv run --project . scenario-research multi-run ../../camel-oasis-scaffold/examples/multi_scenarios.json --target modal
+# (or from meta-utilities root: uv run --project mcp-servers/scenario-research scenario-research multi-run camel-oasis-scaffold/examples/... --target modal)
 ```
 
 ## Run MCP server
@@ -49,13 +54,42 @@ Register with host (example for Grok; see templates/):
 [mcp_servers.scenario-research]
 command = "uvx"
 args = ["scenario-research-mcp"]
-tool_timeouts = { scenario_research = 3600, run_scenario = 3600, run_multi_scenario = 3600 }
+tool_timeouts = { scenario_research = 3600, run_scenario = 3600, run_multi_scenario = 3600, dispatch_multi_scenario_to_modal = 300 }
 ```
 
 ## Timeouts (two-layer)
 
 - Client: `SCENARIO_RESEARCH_TIMEOUT_SEC` (default 1800s for heavy sims).
 - Host: `tool_timeouts` entry for the long tools.
+
+## Remote Modal multi-scenario dispatch (from this CLI/MCP)
+
+The `scenario-research multi-run <file> --target modal` (or `--remote modal`) command (and the MCP `dispatch_multi_scenario_to_modal` tool) is the supported way to kick off a batch on the remote Modal workers defined in `camel-oasis-scaffold/src/camel_sim/modal_app.py`.
+
+- Portable: uses the same `get_scaffold_root()` + sys.path injection as the local multi-run path. Works from the meta-utilities checkout root without `cd` into the scaffold.
+- Kick-off (fire-and-forget): the CLI/MCP returns immediately after starting the documented `modal run .../modal_app.py` entrypoint in a detached child. The remote `run_scenario_remote.map(...)` + `write_results_remote` (to the `sim-results` Volume) continues independently.
+- Flags forwarded: `--execution-mode` (local|camel), `--output-format` (parquet recommended), `--server-urls-json` (for camel mode with real endpoints).
+- Install (into the scenario-research project/env):
+
+  ```bash
+  uv pip install -e "mcp-servers/scenario-research[modal]"
+  uv pip install -e "camel-oasis-scaffold[modal,parquet]"
+  ```
+
+  Then (from meta root):
+
+  ```bash
+  uv run --project mcp-servers/scenario-research scenario-research multi-run \
+    camel-oasis-scaffold/examples/multi_scenarios.json --target modal
+  ```
+
+- Two-layer timeout for this path: launch/submit bounded by `MODAL_LAUNCH_TIMEOUT_SEC` (or `SCENARIO_RESEARCH_TIMEOUT_SEC`); the long-running remote job uses the per-function `timeout=900` + `Retries` declared inside `modal_app.py`.
+- Graceful errors: if `modal` CLI missing or scaffold undiscoverable, you get an actionable message with the exact `uv pip ...[modal,parquet]` command and no "cd" requirement.
+- Results: land in the `sim-results` Modal Volume. (Full retrieval/polling into the meta layer is follow-up work; use `modal volume get` / dashboard in the interim.)
+- MCP: hosts and agents call `dispatch_multi_scenario_to_modal(scenario_file=..., ...)`; register `dispatch_multi_scenario_to_modal` (or the `run_multi_scenario` bucket) in your host's `tool_timeouts`.
+- The raw `modal run` inside the scaffold dir still works; the CLI/MCP path is the unified, documented, portable recommendation.
+
+See also: `camel-oasis-scaffold/README.md` (updated to point here) and the dispatch implementation in `scenario_research/scaffold_adapter.py` + CLI/MCP surfaces.
 
 ## Local inference backends (cost reduction)
 
@@ -94,6 +128,8 @@ scenario-research prov --active-only --timeout-sec 0.5
 ```
 
 Note: `mlx` is typically an in-process local runtime, so probe output will mark it as a non-HTTP endpoint rather than pinging a network health URL.
+
+**Headless / CI / scripting:** All commands accept inputs exclusively via flags/args (including the recent `--target modal` / `--remote` for fire-and-forget dispatch from any cwd via portable scaffold discovery). No interactive prompts in the Typer surfaces. Use `uv run --project mcp-servers/scenario-research scenario-research ...` (or installed entry) from scripts; pipe/redirect freely. See root `cli/README.md` for the full suite (incl. `meta-batch`, oteemo demos, and the oteemo-assistant `--headless` one-shot for the TUI surface). The oteemo-assistant TUI (chat or `--headless`) also supports the same remote dispatch via natural phrases such as "multi-run <file> --target modal" or "dispatch multi scenario to modal <file>" (thin .call to `dispatch_multi_scenario_to_modal`; see `cli/oteemo-assistant/README.md`). Outputs are structured (dicts/JSON) or explicit graceful messages when optional stores (Weaviate) or heavy extras (camel, modal) are absent.
 
 ## LinkML -> Surreal + run artifact writes
 

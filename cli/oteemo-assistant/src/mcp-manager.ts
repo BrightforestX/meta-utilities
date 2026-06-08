@@ -12,6 +12,13 @@
  *
  * Two-layer timeouts documented in README + oteemo docs.
  * px keys live only in the gsd host process env.
+ *
+ * OUTPUT HYGIENE NOTE:
+ * Both connectScenarioResearch (mcp-client) and connectPx use StdioClientTransport with
+ * explicit stderr: 'pipe' + silent drain. This prevents FastMCP/gsd startup banners from
+ * leaking to the real terminal while the interactive Ink TUI (ComposerPrimitive.Input etc.)
+ * owns the screen via raw mode. See mcp-client.ts JSDoc for the full explanation and
+ * why this is non-negotiable for usable text input in the assistant-ui box.
  */
 
 import { connectScenarioResearch, callTool, listTools, runOteemoBillable, type McpHandle } from "./mcp-client.js";
@@ -55,9 +62,32 @@ async function connectPx(): Promise<{ client: Client; close: () => Promise<void>
     command: spawnInfo.command,
     args: spawnInfo.args,
     env: process.env as Record<string, string>,
+    // stderr: 'pipe' (NOT default/omit/'inherit') — REQUIRED to protect the parent Ink TUI.
+    // See mcp-client.ts and module JSDoc. The gsd-mcp-server (px) prints a startup line
+    // "[gsd-mcp-server] MCP server started on stdio" (and FastMCP does its rich banner for scenario).
+    // These must be captured by the SDK (into transport.stderr) rather than forwarded to the
+    // real terminal. While Ink controls the TTY (raw mode + its virtual screen), any leaked
+    // child output corrupts cursor state and breaks key event delivery to ComposerPrimitive.Input
+    // (typing/backspace/Enter stop working; banner "flash" is the observable symptom).
+    // Silent drain below + close on client.close() keeps the interactive surface responsive.
+    // (Graceful: if !getPxSpawn we never reach here; pxHandle remains null.)
+    stderr: "pipe",
   });
   const client = new Client({ name: "oteemo-assistant-px", version: "0.1.0" }, { capabilities: {} });
   await client.connect(transport);
+
+  // Silent drain of piped child stderr (same contract as scenario child).
+  // Zero writes to real process.stderr / console during TUI lifetime.
+  const childStderr = (transport as any).stderr;
+  if (childStderr && typeof childStderr.on === "function") {
+    childStderr.on("data", () => {
+      /* silent: protect Ink TUI terminal ownership and ComposerPrimitive.Input */
+    });
+    childStderr.on("error", () => {
+      /* best-effort; close path handles transport teardown */
+    });
+  }
+
   const close = async () => { try { await client.close(); } catch {} };
   return { client, close };
 }

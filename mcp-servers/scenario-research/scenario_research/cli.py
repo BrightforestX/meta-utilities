@@ -17,7 +17,12 @@ from pathlib import Path
 from . import __version__
 from .models import ScenarioRun
 from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
-from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario, get_scaffold_root
+from .scaffold_adapter import (
+    dispatch_multi_scenario_to_modal,
+    execute_multi_scenario_configs,
+    execute_scenario,
+    get_scaffold_root,
+)
 from .ontology_ingest import (
     ingest_ontology as _ingest_impl,
     search_ontology as _search_impl,
@@ -70,12 +75,42 @@ def _get_default_from_scenario(
     return _coerce_int(raw, fallback)
 
 
+def _run_oteemo_optimization(periods: int, seed: int | None) -> dict[str, Any]:
+    """Run the oteemo_billable policy optimization + robustness replay (the documented
+    `--optimize` path). Portable: adds the scenario-research project root (parent of the
+    oteemo/ sibling) to sys.path so `oteemo.optimization.oteemo` resolves regardless of CWD.
+    Graceful: pulp is optional (the optimizer falls back to argmax) and any failure is
+    surfaced as a dict instead of crashing the run.
+    """
+    import sys as _sys
+
+    sr_root = Path(__file__).resolve().parents[1]  # mcp-servers/scenario-research (parent of oteemo/)
+    if str(sr_root) not in _sys.path:
+        _sys.path.insert(0, str(sr_root))
+    from oteemo.optimization.oteemo import (  # type: ignore
+        load_firm_init,
+        optimize_oteemo_policy,
+        replay_oteemo_policy,
+    )
+
+    init = load_firm_init()
+    opt = optimize_oteemo_policy(periods=periods, seed=seed or 42, init=init)
+    chosen = (opt.get("chosen") or {}).get("policy")
+    replay = (
+        replay_oteemo_policy(chosen, periods=periods, seed=seed or 42, init=init)
+        if chosen
+        else {"status": "skipped", "reason": "no chosen policy"}
+    )
+    return {"optimize": opt, "replay": replay}
+
+
 def _run_impl(
     scenario: str,
     agents: int | None,
     steps: int | None,
     seed: int | None,
     ontology: str | None,
+    optimize: bool = False,
 ) -> None:
     trace = traced(
         name="scenario_research.cli.run",
@@ -85,6 +120,7 @@ def _run_impl(
             "steps": steps,
             "seed": seed,
             "ontology": ontology,
+            "optimize": optimize,
         },
         metadata={"surface": "cli"},
     )
@@ -158,12 +194,37 @@ def _run_impl(
                 metadata={"run_id": r.run_id},
             )
         trace.record_artifacts_from_run(r, created_by_step="execute_scenario")
+
+        optimization: dict[str, Any] | None = None
+        if optimize:
+            if scenario == "oteemo_billable":
+                optimization = _run_oteemo_optimization(periods=resolved_steps, seed=seed)
+                trace.record_step(
+                    name="optimize_policy",
+                    inputs={"scenario": scenario, "periods": resolved_steps, "seed": seed},
+                    outputs={
+                        "status": (optimization.get("optimize") or {}).get("status"),
+                        "objective": (optimization.get("optimize") or {}).get("objective"),
+                    },
+                    reasoning_summary="Ran governed policy grid optimization + robustness replay for oteemo_billable.",
+                )
+            else:
+                # --optimize is currently only defined for the self-contained oteemo_billable
+                # scenario; surface a clear note rather than silently ignoring or crashing.
+                optimization = {
+                    "status": "unsupported",
+                    "note": f"--optimize is only implemented for 'oteemo_billable' (got {scenario!r}); ran baseline only.",
+                }
+
         trace.finalize(
             outputs={"run_id": r.run_id, "status": r.status, "scenario": r.scenario},
             error=r.error,
         )
         trace.attach_to_run(r)
-        print(r.model_dump())
+        if optimization is not None:
+            print({"run": r.model_dump(), "optimization": optimization})
+        else:
+            print(r.model_dump())
     except Exception as exc:
         trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
         raise
@@ -382,9 +443,10 @@ def run(
     steps: int | None = typer.Option(None, "--steps", "-n", help="Step count; defaults from ontology scenario parameters."),
     seed: int | None = typer.Option(42, "--seed", "-s", help="Deterministic seed for reproducibility."),
     ontology: str | None = typer.Option(None, "--ontology", "-o", help="Ontology folder name or LinkML schema name."),
+    optimize: bool = typer.Option(False, "--optimize", help="For oteemo_billable: run policy grid optimization + robustness replay (pulp optional, graceful fallback)."),
 ) -> None:
     """Run governed scenario. Defaults are loaded from ontology when omitted."""
-    _run_impl(scenario=scenario, agents=agents, steps=steps, seed=seed, ontology=ontology)
+    _run_impl(scenario=scenario, agents=agents, steps=steps, seed=seed, ontology=ontology, optimize=optimize)
 
 
 @app.command("r")
@@ -394,9 +456,10 @@ def run_short(
     steps: int | None = typer.Option(None, "--steps", "-n"),
     seed: int | None = typer.Option(42, "--seed", "-s"),
     ontology: str | None = typer.Option(None, "--ontology", "-o"),
+    optimize: bool = typer.Option(False, "--optimize"),
 ) -> None:
     """Short alias for run."""
-    _run_impl(scenario=scenario, agents=agents, steps=steps, seed=seed, ontology=ontology)
+    _run_impl(scenario=scenario, agents=agents, steps=steps, seed=seed, ontology=ontology, optimize=optimize)
 
 
 @app.command("multi-run")
@@ -404,16 +467,52 @@ def multi_run(
     scenario_file: Path = typer.Argument(..., help="JSON object or array of CAMEL ScenarioConfig objects."),
     output_dir: Path | None = typer.Option(
         None,
-        help="Output directory for event and summary artifacts.",
+        help="Output directory for event and summary artifacts (local/camel targets only; Modal writes to its 'sim-results' Volume).",
     ),
     execution_mode: str = typer.Option(
         "local",
-        help="local for deterministic CLI runs, camel for configured CAMEL model backends.",
+        help="local for deterministic CLI runs, camel for configured CAMEL model backends (also forwarded to --target modal).",
     ),
-    output_format: str = typer.Option("jsonl", help="jsonl | json | parquet"),
-    parallel: bool = typer.Option(False, help="Run scenarios concurrently in local mode."),
+    output_format: str = typer.Option("jsonl", help="jsonl | json | parquet (forwarded to --target modal as well)."),
+    parallel: bool = typer.Option(False, help="Run scenarios concurrently in local mode (ignored for modal target)."),
+    target: str = typer.Option(
+        "local",
+        "--target",
+        "--remote",
+        help="Execution target: 'local' (default; scaffold runner), 'camel' (CAMEL agents), or 'modal' (remote Modal workers via scaffold modal_app entrypoint). Use --target modal to kick off analysis from this CLI without manual cd into the scaffold.",
+    ),
+    server_urls_json: str = typer.Option(
+        "",
+        "--server-urls-json",
+        help="Optional JSON string of model->base_url overrides (used by camel execution_mode or when dispatching to modal with non-default SGLang endpoints).",
+    ),
 ) -> None:
-    """Run the CAMEL multi-scenario service via the co-located scaffold."""
+    """Run the CAMEL multi-scenario service via the co-located scaffold.
+
+    When --target modal (or --remote modal):
+    - Uses portable get_scaffold_root() discovery (no cd required, works from meta-utilities root).
+    - Delegates to the scaffold's documented `modal run .../modal_app.py --scenario-file ...` entrypoint.
+    - The dispatch is fire-and-forget (kick-off): the CLI returns promptly with dispatch metadata (pid, volume, monitor hints).
+      The remote batch (map over run_scenario_remote + write to sim-results Volume) continues independently.
+    - Two-layer timeout: launch bounded by MODAL_LAUNCH_TIMEOUT_SEC; long-running remote job uses the timeouts/retries defined inside modal_app.py.
+    - Forwarded flags: --execution-mode, --output-format, --server-urls-json.
+    - Requires the camel-oasis-scaffold[modal,parquet] (and thus the 'modal' CLI) to be installed in the same env as scenario-research.
+      The error message on missing 'modal' is actionable and matches the guard in modal_app.py.
+
+    Local and camel targets are 100% unchanged.
+    """
+    t = (target or "local").lower()
+    if t == "modal":
+        payload = dispatch_multi_scenario_to_modal(
+            scenario_file,
+            output_format=output_format,
+            execution_mode=execution_mode,
+            server_urls_json=server_urls_json,
+        )
+        print(payload)
+        return
+
+    # Local / camel path (unchanged behavior and artifacts contract)
     root = get_scaffold_root()
     if output_dir is None:
         output_dir = root / "data" / "camel_sim_results"
@@ -432,7 +531,7 @@ def multi_run(
         {
             "scenarios": payload["scenarios"],
             "execution_mode": payload["execution_mode"],
-            "artifacts": payload["artifacts"],
+            "artifacts": payload.get("artifacts") or payload.get("scaffold_root"),
         }
     )
 

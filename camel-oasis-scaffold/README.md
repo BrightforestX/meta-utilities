@@ -139,11 +139,27 @@ uv run scenario-research multi-run ../../camel-oasis-scaffold/examples/multi_sce
 ```
 
 For Modal/SGLang deployment, install the optional extra and run the Modal
-entrypoint:
+entrypoint (or, preferably, use the unified meta-utilities CLI surface from the
+co-located `mcp-servers/scenario-research` package — no cd, portable discovery):
 
 ```bash
+# Inside camel-oasis-scaffold (for the raw path):
 uv pip install -e ".[modal,parquet]"
 modal run src.camel_sim.modal_app --scenario-file examples/multi_scenarios.json
+
+# Recommended (from meta-utilities root, after installing the scaffold's modal extra
+# into the scenario-research env):
+uv run --project mcp-servers/scenario-research scenario-research multi-run \
+  camel-oasis-scaffold/examples/multi_scenarios.json --target modal \
+  --execution-mode local --output-format parquet
+```
+
+The `scenario-research ... --target modal` (and MCP `dispatch_multi_scenario_to_modal`)
+path is the supported way to kick off from the meta-utilities tree. It uses the
+same portable scaffold discovery as the local multi-run, delegates to this
+`modal_app` entrypoint, and does fire-and-forget launch (the remote map + volume
+write continues after the CLI returns). See `mcp-servers/scenario-research/README.md`
+for the full two-layer timeout contract, install steps, and MCP usage.
 ```
 
 ## Why this stack

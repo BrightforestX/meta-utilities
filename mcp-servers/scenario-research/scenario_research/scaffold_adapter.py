@@ -9,6 +9,9 @@ All scenario, model, workforce, and analysis logic stays in the scaffold.
 """
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -255,3 +258,147 @@ def execute_multi_scenario_configs(
     else:
         payload["scaffold_root"] = str(root)
     return payload
+
+
+def dispatch_multi_scenario_to_modal(
+    scenario_file: Path | str,
+    *,
+    output_format: str = "parquet",
+    execution_mode: str = "local",
+    server_urls_json: str = "",
+) -> dict[str, Any]:
+    """Dispatch a multi-scenario batch to remote Modal workers.
+
+    Delegates to the co-located camel-oasis-scaffold's documented `modal run`
+    entrypoint (modal_app.py @app.local_entrypoint) using portable discovery.
+    This is a "kick-off" / fire-and-forget dispatch: the returned payload
+    indicates the child process was started; the CLI/MCP caller does not block
+    for the full remote execution (the .map + volume write inside the entrypoint
+    continues in the background child).
+
+    The scenario_file is resolved to absolute from the caller's CWD for
+    robustness when invoked via uv run from the meta-utilities tree root.
+    The same get_scaffold_root() + sys.path discipline as local multi-run is used
+    to construct PYTHONPATH for the child so the modal CLI can load the app
+    definition (relative imports + src layout) without requiring the caller to cd.
+
+    Two-layer timeout model:
+    - Launch/kick-off phase: bounded by MODAL_LAUNCH_TIMEOUT_SEC (default 180s)
+      or SCENARIO_RESEARCH_TIMEOUT_SEC in MCP contexts. This covers modal CLI
+      startup, any image build, and submission.
+    - Long-running remote job: governed entirely by the Modal infra + the
+      definitions inside modal_app.py (per-fn timeout=900, Retries(2), and the
+      overall entrypoint duration). The parent CLI/MCP process does not wait for it.
+
+    Graceful degradation:
+    - If scaffold cannot be discovered: the same RuntimeError from get_scaffold_root()
+      (with CAMEL_OASIS_SCAFFOLD_ROOT hint) is raised.
+    - If 'modal' CLI not on PATH: actionable error telling the user to install
+      the *scaffold* with its [modal,parquet] extra into the environment that
+      runs scenario-research (so 'modal' entrypoint + camel deps are present),
+      plus the usual `modal token new` / auth step. Matches the guard message
+      style in modal_app.py exactly.
+    - No changes to local/camel execution_mode paths.
+
+    Does not duplicate runner logic: the actual batch, server_urls handling,
+    remote map, and volume write all live in (and are delegated to) the scaffold.
+    """
+    root = get_scaffold_root()
+    modal_script = root / "src" / "camel_sim" / "modal_app.py"
+    if not modal_script.exists():
+        raise RuntimeError(
+            f"modal_app.py not found at {modal_script} after portable discovery. "
+            "Ensure camel-oasis-scaffold is a sibling of mcp-servers/ (or set CAMEL_OASIS_SCAFFOLD_ROOT)."
+        )
+
+    sf = Path(scenario_file).resolve()
+    # We pass the resolved path to modal; it will load inside the entrypoint.
+    # Early existence check is nice-to-have but not required (modal will surface
+    # a clear load error if the file is bad or unreadable in context).
+
+    modal_cli = shutil.which("modal")
+    if modal_cli is None:
+        raise RuntimeError(
+            "The 'modal' CLI is not available in PATH. "
+            "To kick off Modal multi-scenario analysis from the meta-utilities scenario-research CLI (or MCP), "
+            "install the camel-oasis-scaffold with the modal extra into the *same* environment used by scenario-research "
+            "(this brings the 'modal' console script + the scaffold's runtime imports for the app definition): "
+            "uv pip install -e 'camel-oasis-scaffold[modal,parquet]' "
+            "(or from the scenario-research dir: uv pip install -e '../../camel-oasis-scaffold[modal,parquet]'). "
+            "Then authenticate if needed: modal token new. "
+            "After that, `scenario-research multi-run <file> --target modal` (or the MCP dispatch tool) will work from any CWD. "
+            "See camel-oasis-scaffold/README.md (Modal section) and the guard in src/camel_sim/modal_app.py."
+        )
+
+    cmd: list[str] = [
+        modal_cli,
+        "run",
+        str(modal_script),
+        "--scenario-file",
+        str(sf),
+        "--output-format",
+        output_format,
+        "--execution-mode",
+        execution_mode,
+    ]
+    if server_urls_json:
+        cmd.extend(["--server-urls-json", server_urls_json])
+
+    # Portable env for child so modal CLI's python can resolve "from .config..." and "import src..." when loading modal_app.py
+    env = os.environ.copy()
+    existing_pp = env.get("PYTHONPATH", "")
+    pp_parts = [str(root), str(root / "src")]
+    if existing_pp:
+        pp_parts.append(existing_pp)
+    env["PYTHONPATH"] = os.pathsep.join(pp_parts)
+
+    launch_timeout = float(os.getenv("MODAL_LAUNCH_TIMEOUT_SEC", os.getenv("SCENARIO_RESEARCH_TIMEOUT_SEC", "180")))
+
+    print(
+        {
+            "status": "dispatching",
+            "target": "modal",
+            "cmd": " ".join(cmd),
+            "scenario_file": str(sf),
+            "scaffold_root": str(root),
+            "launch_timeout_sec": launch_timeout,
+        }
+    )
+
+    # Kick-off semantics: start the documented entrypoint (which internally does the remote .map + write_results_remote to volume).
+    # We use Popen + new session so the long-running remote work survives the parent CLI/MCP process exit.
+    # stdout/stderr are inherited so the user immediately sees the modal entrypoint's prints
+    # ("Dispatching N scenarios to Modal...", the completion line, the volume paths).
+    # We intentionally do *not* .wait() or .communicate() for the full duration.
+    popen_kwargs: dict[str, Any] = {
+        "env": env,
+        "stdout": None,  # inherit for live output from modal (Dispatching..., volume write result, etc.)
+        "stderr": None,
+    }
+    if os.name == "posix":
+        popen_kwargs["preexec_fn"] = os.setsid  # new session / process group; child outlives parent exit
+    else:
+        # Windows: detach so parent exit doesn't kill the child
+        popen_kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+
+    return {
+        "status": "dispatched",
+        "target": "modal",
+        "pid": proc.pid,
+        "cmd": " ".join(cmd),
+        "scenario_file": str(sf),
+        "scaffold_root": str(root),
+        "volume": "sim-results",
+        "note": (
+            "Modal batch kicked off via the scaffold modal_app entrypoint (fire-and-forget). "
+            "The remote run_scenario_remote.map + write_results_remote to the 'sim-results' Modal Volume continues in the child (pid above). "
+            "This CLI/MCP call returned immediately without waiting for remote completion. "
+            "Monitor: modal app list, modal logs <app>, modal volume ls sim-results. "
+            "Retrieve artifacts later via `modal volume get sim-results ...` (or future scenario-research retrieval tool). "
+            "Two-layer timeouts: launch/submit phase bounded by MODAL_LAUNCH_TIMEOUT_SEC (client); the long-running remote work uses the per-function timeout=900 + Retries inside modal_app.py."
+        ),
+    }

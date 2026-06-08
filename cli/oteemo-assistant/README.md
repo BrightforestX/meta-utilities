@@ -43,6 +43,7 @@ Commands in the TUI (exact same surface as before):
 - `show report`, `validate <yaml>`, `health`, `help`
 - **Ontology recall (new)**: `ingest ontology` / `reindex ontology`, `show ontology MemoryItem`, `show ontology raja_gudepu_ceo`, `ontology search finops`
 - **Ontology deletes (first-class, explicit)**: `delete ontology raja_gudepu_ceo` (or bare name), `delete ontology --name MemoryItem`, `delete ontology --source "oteemo/ontology/agents"`, `delete ontology --entity-type role` (advanced), `delete ontology --all` (DANGEROUS broad with warning in help text). Surfaces as cyan delete summary (count + removed names list + selectors) via MCP; status MODE "Ontology Delete"; graceful same as ingest/search. (Previously deletes were only internal side-effect of reindex in ingest.)
+  - **Casing note (fixed 2026-06)**: ontology show/search/delete names are extracted preserving original case from your input (e.g. `MemoryItem`, not `memoryitem`). This ensures they match the exact `name` values stored in Weaviate chunks (ingested from YAML/LinkML sources that use mixed/camelCase). The prior footgun (full `.toLowerCase()` before extracting `name`/`source`/`entity_type`) caused `deleted: 0` even for real data. Both interactive text box and `--headless --command` paths now forward cased selectors. (Backend delete uses exact `Filter.by_property("name").equal(...)`; search is more tolerant.)
 
 ## The Bottom Status Bar (the star of the 2026-06 upgrade)
 
@@ -114,6 +115,67 @@ The TUI now controls ontology as a first-class recall layer (additive; disk YAML
 - All via existing MCP manager.call + two-layer timeout (SCENARIO_RESEARCH_TIMEOUT_SEC). Pure sim / prior flows 100% unaffected. Deletes affect Weaviate recall only.
 
 See updated scenario-research README + oteemo-billable.md for details. Follow-ups (better chunking, instance data in odrs_* colls, TUI confirm for --all) tracked in UI recs.
+
+## Remote scenario analysis (Modal) — multi-run dispatch
+
+The assistant now supports kicking off **remote multi-scenario analysis** on Modal workers (the `--target modal` / `dispatch_multi_scenario_to_modal` path recently added to the Python `scenario-research` CLI + MCP).
+
+This is **fire-and-forget kick-off** (thin delegation): the assistant/MCP returns immediately with dispatch metadata (status, pid, cmd, `sim-results` volume, monitor/retrieve notes). The actual `run_scenario_remote.map(...)` + volume write continues in a detached child on the Modal side. Use the `modal` CLI to monitor/retrieve (full polling back into meta layer is future work).
+
+**Thin surface**: uses the existing generic `manager.scenario.call("dispatch_multi_scenario_to_modal", { scenario_file, execution_mode?, output_format?, server_urls_json? })`. No new typed method on ScenarioAPI (power users can always call arbitrary tools directly via the manager in headless/scripts or custom hosts).
+
+**Natural language in the TUI chat (exact examples you can type):**
+- `multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal`
+- `dispatch multi scenario to modal camel-oasis-scaffold/examples/multi_scenarios.json`
+- `run multi scenarios remotely --target modal camel-oasis-scaffold/examples/multi_scenarios.json --execution-mode camel --output-format parquet`
+- `remote analysis modal camel-oasis-scaffold/examples/multi_scenarios.json`
+
+The parser extracts the first path-like token as `scenario_file` (supports relative paths from the meta root, as recommended in the scenario-research docs) + optional `--execution-mode`, `--output-format` / `--format`, `--server-urls-json`. Presence of "modal"/"remote"/"multi-run"/"dispatch multi" routes to the dispatch kind.
+
+**Status bar**: lights up `MODE: Remote Multi-Scenario (Modal)` during the (short) launch phase.
+
+**Render**: cyan-bordered dispatch card showing status/pid/volume/file/cmd + the full note (monitor hints + two-layer timeout reminder). Errors (e.g. `modal` CLI not installed in the scenario-research env) surface as clear actionable text (the same message the Python CLI/MCP would give, with the exact `uv pip install -e 'camel-oasis-scaffold[modal,parquet]'` guidance). No crash.
+
+**Headless / scripting / CI (one-shot, no TTY):**
+```bash
+# From meta root (portable shim)
+echo 'multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal' | ./scripts/oteemo-assistant --headless
+
+# Or direct (fresh src)
+cd cli/oteemo-assistant
+echo 'dispatch multi scenario to modal camel-oasis-scaffold/examples/multi_scenarios.json --output-format parquet' | npx --yes tsx src/cli.tsx --headless
+
+# With --command
+npx --yes tsx src/cli.tsx --headless --command 'multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal --execution-mode local'
+```
+
+The headless path uses the exact same `parseIntentLocal` + `manager.scenario.call` as the TUI, prints the JSON dispatch payload (or graceful error), closes the MCPs, and exits 0/1 appropriately.
+
+**Generic call path (power users / custom scripts, no new parseIntent required):**
+After the manager is created, any host can do:
+```ts
+const res = await manager.scenario.call("dispatch_multi_scenario_to_modal", {
+  scenario_file: "camel-oasis-scaffold/examples/multi_scenarios.json",
+  execution_mode: "camel",
+  output_format: "parquet",
+  // server_urls_json: JSON.stringify({ ... }) optional
+});
+console.log(res); // { status: "dispatched", pid: ..., cmd: ..., volume: "sim-results", note: "..." }
+```
+Documented in the help output and status guidance. The natural phrases above are the ergonomic entry point for chat + headless `--command`.
+
+**Cross-link**: See `mcp-servers/scenario-research/README.md` (the "Remote Modal multi-scenario dispatch" section + CLI `multi-run --target modal` docs) and `camel-oasis-scaffold/README.md` for the underlying `modal_app.py` entrypoint, install extras, `modal token new`, volume usage, and two-layer timeout details (client launch cap via `MODAL_LAUNCH_TIMEOUT_SEC` / `SCENARIO_RESEARCH_TIMEOUT_SEC`; long-running work governed inside Modal functions).
+
+**When to prefer the direct `scenario-research` CLI vs the assistant**:
+- Direct CLI (`uv run --project mcp-servers/scenario-research scenario-research multi-run <file> --target modal ...`): best for scripts, CI, exact flags, non-Node environments, or when you want the Typer/Rich output directly.
+- Assistant (chat or `--headless`): best for interactive exploration alongside oteemo runs / px pulls / ontology recall in one TUI, or when piping a natural phrase from another process into the Node surface. Same contracts, same MCP, same graceful degradation.
+
+**Current limitations**:
+- Result retrieval from the `sim-results` Modal Volume still requires the `modal` CLI (`modal volume ls/get sim-results ...`). No built-in "pull results" tool yet in the assistant or scenario-research surface.
+- The scenario_file path is resolved relative to the *MCP server's CWD* (the scenario-research uv project), not the assistant's CWD. Use paths relative to the meta-utilities root (as in the examples above) for portability.
+- Requires the optional `[modal,parquet]` extras installed into the *same* environment that runs `scenario-research-mcp` (the assistant just spawns it; it does not install for you). If missing you get the actionable error immediately (good).
+
+Pure sim + local `multi-run` (without --target modal) and all prior oteemo/ontology/px paths are completely unaffected.
 
 ## Architecture notes
 

@@ -1,0 +1,17 @@
+{
+  "id": "33a14f2fd684",
+  "stored_at": "2026-06-08T18:00:13.030335+00:00",
+  "title": "report",
+  "tags": [
+    "batch",
+    "ratchet",
+    "citations",
+    "meta-utilities",
+    "2.3-dogfood",
+    "live-rag"
+  ],
+  "citations": [],
+  "metadata": {},
+  "content": "# Ratchet Citation Graph (Task 2.3 dogfood pipeline output)\nrun_id: f3b492bd-3de7-4036-b038-3bd67d0dd1f1\n\n## Kept Section\nsub report with https://cite [1]\n",
+  "summary": "# Ratchet Citation Graph (Task 2.3 dogfood pipeline output) run_id: f3b492bd-3de7-4036-b038-3bd67d0dd1f1 ## Kept Section sub report with https://cite [1]"
+}

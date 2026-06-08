@@ -20,8 +20,15 @@ dependencies = [
 
 [project.optional-dependencies]
 vector = [
-  "numpy>=1.24",
-  "sentence-transformers>=2.2",
+  # numpy<2 keeps ABI compatibility with the torch 2.2.x wheel that the
+  # sentence-transformers stack resolves to (torch is built against numpy 1.x;
+  # numpy 2.x triggers "_ARRAY_API not found" and a cascading transformers failure).
+  "numpy>=1.26,<2",
+  # transformers/sentence-transformers <5: the 5.x line requires torch>=2.4, which is
+  # unavailable on some targets (e.g. x86_64 macOS caps at torch 2.2.x). The 4.x line
+  # installs everywhere and keeps torch detected, avoiding a transformers import crash.
+  "transformers>=4.41,<5",
+  "sentence-transformers>=2.2,<5",
   "weaviate-client>=4",
 ]
 # firecrawl is external (no py dep); used by deep-research for grounding, this for citation verification in future

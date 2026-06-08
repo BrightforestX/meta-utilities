@@ -35,6 +35,7 @@ LONG_RUNNING_TOOLS: list[str] = [
     "scenario_research_health",  # short
     "run_scenario",
     "run_multi_scenario",
+    "dispatch_multi_scenario_to_modal",  # Modal kick-off (launch phase bounded; remote job runs independently on Modal)
     "ingest_ontology",
     "search_ontology",
     # future: "ask", "fit_models", "execute_replicate_batch" etc.

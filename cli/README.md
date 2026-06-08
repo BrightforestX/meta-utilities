@@ -94,7 +94,14 @@ MODE: Ontology Reindex | ...   # or Ontology Search
 - MCP tool: `delete_ontology` (same selectors; returns deleted + removed names sample + graceful).
 Deletes now explicitly first-class via oteemo-assistant (TUI intents + manager.scenario.call + "Ontology Delete" MODE + cyan result render with count/list), CLI, and MCP. Existing ingest internal clear behavior unchanged (DRY-refactored to helper). Disk YAMLs + pure-sim sacred.
 
-Results (incl. deletes) render as cyan-bordered cards/summaries (entity + name + source + tags for search; for delete: count + removed names list + selectors). The status bar switches to `Ontology Reindex` / `Ontology Search` / `Ontology Delete` during the operation.
+**Remote multi-scenario analysis (Modal dispatch)**
+- Chat or `--headless`: `multi-run camel-oasis-scaffold/examples/multi_scenarios.json --target modal` (or "dispatch multi scenario to modal <file>", "run multi scenarios remotely --target modal").
+- Thin delegation to `dispatch_multi_scenario_to_modal` (fire-and-forget; returns dispatch payload with pid/volume/note immediately). Sets MODE "Remote Multi-Scenario (Modal)"; renders structured result card. Same portable scaffold discovery + two-layer timeout contract as the Python `scenario-research multi-run --target modal` CLI.
+- Headless examples: `echo 'multi-run ... --target modal' | ./scripts/oteemo-assistant --headless` (or npx tsx in the package). Generic `manager.scenario.call("dispatch_multi_scenario_to_modal", {scenario_file, ...})` works for power users without the new parse.
+- Prefer the direct Python CLI (`uv run --project mcp-servers/scenario-research scenario-research multi-run <file> --target modal`) for scripts/CI; use the assistant when you want the phrase in the same chat as oteemo runs + px + ontology. See `cli/oteemo-assistant/README.md` (new "Remote scenario analysis (Modal)" section) and `mcp-servers/scenario-research/README.md` for full details, install extras, `modal` monitoring, and limitations (result retrieval from sim-results volume still needs the modal CLI today).
+- All prior surfaces unaffected.
+
+Results (incl. deletes) render as cyan-bordered cards/summaries (entity + name + source + tags for search; for delete: count + removed names list + selectors). The status bar switches to `Ontology Reindex` / `Ontology Search` / `Ontology Delete` during the operation. (Remote Modal dispatch uses its own MODE + card style.)
 
 **Graceful degradation**
 - No px tree / keys → "pure sim path remains fully functional".
@@ -147,6 +154,56 @@ scenario-research-mcp
 ```
 
 See `mcp-servers/scenario-research/README.md` and `oteemo/docs/oteemo-billable.md` for full details, DB prereqs for governed memory, and the batch-orchestrator integration.
+
+### Headless / non-interactive / scripting / CI usage (new)
+
+All Python CLIs (`scenario-research`, `oasis-research`, `meta-batch`, `research-memory`, `deep-research-mcp`, the oteemo demos, and scripts) are fully usable in non-TTY, piped, redirected, or container/CI environments. No `input()`, `typer.confirm` with default prompts, or hard TTY assumptions in the core paths. Safe non-destructive defaults apply when stdin is not a tty.
+
+**Direct Python surfaces (recommended for scripts):**
+```bash
+# From meta-utilities root (portable; uses the project's uv layout)
+uv run --project mcp-servers/scenario-research scenario-research --help
+uv run --project mcp-servers/scenario-research scenario-research run oteemo_billable --steps 4 --seed 42
+uv run --project mcp-servers/scenario-research scenario-research multi-run examples/multi_scenarios.json --target local --execution-mode local --output-dir /tmp/out
+uv run --project mcp-servers/scenario-research scenario-research search-ontology "finops"
+uv run --project mcp-servers/scenario-research scenario-research multi-run ... --target modal   # fire-and-forget kickoff; returns dispatch payload + pid immediately
+
+uv run --project mcp-servers/batch-orchestrator meta-batch --help
+uv run --project mcp-servers/batch-orchestrator meta-batch status
+uv run --project mcp-servers/batch-orchestrator meta-batch validate path/to/jobs.yaml
+
+# oteemo demo (argparse, already headless)
+python -m oteemo.demos.oteemo_billable_max --periods 3 --seed 42
+```
+
+**oteemo-assistant (Ink TUI) headless one-shot path:**
+```bash
+# Preferred for fresh src (tsx)
+cd cli/oteemo-assistant
+echo 'health' | npx --yes tsx src/cli.tsx --headless
+npx --yes tsx src/cli.tsx --headless --command 'run oteemo 4'
+echo 'search ontology finops' | npx --yes tsx src/cli.tsx --headless
+echo 'delete ontology --name MemoryItem' | npx --yes tsx src/cli.tsx --headless
+
+# Via the portable shim (forwards args; prefers built dist; rebuild after src edits)
+./scripts/oteemo-assistant --headless --command 'health'
+echo 'run oteemo 3' | ./scripts/oteemo-assistant --headless
+```
+
+The `--headless` path bypasses the full ThreadPrimitive/Ink UI, creates the McpManager, runs parseIntent + direct scenario/px calls, prints JSON or text result, closes, and exits. Same power as the chat (run oteemo, ontology ops, px pulls, health) without interactivity. Pure sim always works; px graceful.
+
+**Scripts (flag or status driven; set -euo pipefail):**
+```bash
+./scripts/ensure-local-dbs.sh            # status/check only (non-mutating)
+./scripts/ensure-local-dbs.sh --up       # bring up if docker (guarded)
+BOOTSTRAP_DRY=1 ./scripts/bootstrap.sh /tmp/target
+./scripts/measure_research_metrics.py --help
+bash skills/context-forge/scripts/enable-full-default.sh --yes   # headless full (indexes if --yes; non-tty defaults to safe/no-mutate)
+```
+
+All new flags/modes are optional; TTY interactive behavior for the TUI and the one prompt (now guarded) is unchanged. Use /tmp for outputs. Never reads the caller's real .env for the sweep/tests.
+
+For Modal kickoff from CI/scripts: `scenario-research multi-run <file> --target modal ...` returns immediately with dispatch metadata; the remote work continues. Monitor via `modal` CLI. Requires the optional extras in the same env.
 
 ---
 

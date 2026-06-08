@@ -30,12 +30,33 @@ oasis = [
 research = [
   "turbovec",
   "weaviate-client>=4",
-  "sentence-transformers>=2.2",
+  # transformers/sentence-transformers <5: the 5.x line requires torch>=2.4, but the
+  # last torch wheel available for some targets (e.g. x86_64 macOS) is 2.2.x. The 4.x
+  # transformers line installs across all platforms and keeps `is_torch_available()`
+  # true on torch 2.2.x, avoiding the cascading `NameError: name 'nn' is not defined`.
+  "transformers>=4.41,<5",
+  "sentence-transformers>=2.2,<5",
   "tiktoken>=0.7",
+  # Pin numpy<2: the resolved torch (2.2.x) is compiled against the numpy 1.x ABI
+  # and crashes under numpy 2.x ("_ARRAY_API not found"), which cascades into a
+  # transformers import failure. numpy 1.26 satisfies torch's ABI while scipy/
+  # scikit-learn wheels built against numpy 2.0 remain backward-compatible at runtime.
+  "numpy>=1.26,<2",
 ]
 opt = [
   "pulp>=2.7",
   "ortools>=9.0; platform_system != 'Darwin' or platform_machine != 'arm64'",
+]
+modal = [
+  # Brings the 'modal' CLI + SDK for --target modal / dispatch_multi_scenario_to_modal.
+  # You still install the scaffold itself with its [modal,parquet] extra into the *same*
+  # env so the scaffold code + camel deps are importable when the modal CLI loads
+  # camel-oasis-scaffold/src/camel_sim/modal_app.py. Example:
+  #   uv pip install -e ".[modal]"
+  #   uv pip install -e "../camel-oasis-scaffold[modal,parquet]"
+  # Then `uv run --project . scenario-research multi-run <file> --target modal` works
+  # from the meta-utilities tree root (portable discovery, no cd).
+  "modal",
 ]
 
 [project.scripts]
