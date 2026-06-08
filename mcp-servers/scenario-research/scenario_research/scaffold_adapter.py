@@ -9,9 +9,6 @@ All scenario, model, workforce, and analysis logic stays in the scaffold.
 """
 from __future__ import annotations
 
-import asyncio
-import importlib
-import importlib.util
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -220,3 +217,41 @@ async def execute_scenario(
         run.error = f"{type(exc).__name__}: {exc}"
         run.finished_at = __import__("datetime").datetime.utcnow().isoformat() + "Z"
     return run
+
+
+def execute_multi_scenario_configs(
+    scenario_configs: list[dict[str, Any]],
+    *,
+    execution_mode: str = "local",
+    parallel: bool = False,
+    output_dir: Path | None = None,
+    output_format: str = "jsonl",
+) -> dict[str, Any]:
+    """Run CAMEL multi-scenario configs through the co-located scaffold.
+
+    This keeps MCP/CLI surfaces thin and centralizes the scaffold import boundary.
+    If `output_dir` is provided, artifacts are written with the scaffold collector.
+    """
+    root = get_scaffold_root()
+    from src.camel_sim.results.collector import write_results  # type: ignore
+    from src.camel_sim.simulation.runner import run_scenarios  # type: ignore
+
+    results = run_scenarios(
+        scenario_configs,
+        execution_mode=execution_mode,
+        parallel=parallel,
+    )
+    payload: dict[str, Any] = {
+        "scenarios": len(results),
+        "execution_mode": execution_mode,
+        "results": results,
+    }
+    if output_dir is not None:
+        payload["artifacts"] = write_results(
+            results,
+            output_dir,
+            output_format=output_format,  # type: ignore[arg-type]
+        )
+    else:
+        payload["scaffold_root"] = str(root)
+    return payload

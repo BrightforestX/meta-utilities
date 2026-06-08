@@ -16,20 +16,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 from typing import Any
 
 from fastmcp import FastMCP, Context
 
 from .models import ScenarioRun, CostReport, ResearchReport
+# Union of rich HEAD (analytics/Surreal/observability/pipeline/replay/local router/timeout full) + PR2 multi-scenario execute
 from .analytics import estimate_cost_report, fit_models_from_trace, load_trace_payload
 from .linkml_surreal import persist_run_artifacts, fetch_run_artifacts, query_run_attributions
 from .observability import traced
 from .optimization.replay import replay_policy as replay_policy_robustness
 from .research_pipeline import build_research_report
 from .router import resolve_endpoint, get_model_for_role, get_local_inference_config
-from .scaffold_adapter import execute_scenario, get_scaffold_root
+from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario, get_scaffold_root
 from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNNING_TOOLS, DEFAULT_TIMEOUT_SEC
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
 
@@ -192,6 +192,31 @@ async def run_scenario(
     except Exception as exc:
         trace.finalize(outputs={"scenario": scenario}, error=f"{type(exc).__name__}: {exc}")
         raise
+
+
+@mcp.tool()
+async def run_multi_scenario(
+    scenario_configs: list[dict[str, Any]],
+    execution_mode: str = "local",
+    parallel: bool = False,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Run CAMEL multi-scenario configs through the co-located scaffold.
+
+    Local mode is deterministic and does not require GPUs or API keys. CAMEL mode
+    uses the scaffold's model routing and should be paired with configured model
+    backends or Modal/SGLang endpoints.
+    """
+    payload = execute_multi_scenario_configs(
+        scenario_configs,
+        execution_mode=execution_mode,
+        parallel=parallel,
+    )
+    return {
+        "scenarios": payload["scenarios"],
+        "execution_mode": payload["execution_mode"],
+        "results": payload["results"],
+    }
 
 
 @mcp.tool()

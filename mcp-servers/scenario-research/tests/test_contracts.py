@@ -235,6 +235,7 @@ def test_timeout_contract_env_and_default(monkeypatch):
 
     # also exposed list for host config
     assert "run_scenario" in tmod.LONG_RUNNING_TOOLS
+    assert "run_multi_scenario" in tmod.LONG_RUNNING_TOOLS
 
 
 def test_p7_ci_gates_doc_and_tdd_practice():

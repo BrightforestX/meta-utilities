@@ -1,0 +1,106 @@
+[
+  {
+    "id": "contract_001",
+    "name": "Two-party service contract negotiation",
+    "description": "A buyer and seller negotiate a 12-month SaaS contract",
+    "max_ticks": 4,
+    "termination_condition": "any_contract_accepted",
+    "parameters": {
+      "contract_terms": {
+        "price_usd": 50000,
+        "term_months": 12,
+        "payment": "annual prepay"
+      }
+    },
+    "agents": [
+      {
+        "id": "buyer_1",
+        "role": "buyer",
+        "domain": "negotiation",
+        "persona": "You are a procurement manager seeking maximum cost efficiency."
+      },
+      {
+        "id": "seller_1",
+        "role": "seller",
+        "domain": "negotiation",
+        "persona": "You are a sales director aiming for a durable customer relationship."
+      }
+    ]
+  },
+  {
+    "id": "research_001",
+    "name": "Research synthesis challenge",
+    "description": "Researchers collect and cross-check claims about a market trend",
+    "max_ticks": 3,
+    "termination_condition": "finding_threshold",
+    "parameters": {
+      "claim": "The market is shifting toward hybrid open-source/frontier agent stacks.",
+      "evidence": ["survey_notes", "usage_logs"],
+      "finding_threshold": 1
+    },
+    "agents": [
+      {
+        "id": "researcher_1",
+        "role": "primary researcher",
+        "domain": "research",
+        "persona": "You collect evidence and produce cautious claims."
+      },
+      {
+        "id": "reviewer_1",
+        "role": "peer reviewer",
+        "domain": "research",
+        "persona": "You cite or challenge findings based on evidence quality."
+      }
+    ]
+  },
+  {
+    "id": "scheduling_001",
+    "name": "Cross-functional launch schedule",
+    "description": "A scheduler coordinates a launch planning meeting",
+    "max_ticks": 2,
+    "parameters": {
+      "time_slot": "2026-06-15T15:00:00Z",
+      "agenda": "Finalize launch risks and owners",
+      "participants": ["scheduler_1", "ops_1"]
+    },
+    "agents": [
+      {
+        "id": "scheduler_1",
+        "role": "scheduler",
+        "domain": "scheduling",
+        "persona": "You protect calendars and resolve planning conflicts."
+      },
+      {
+        "id": "ops_1",
+        "role": "operations lead",
+        "domain": "scheduling",
+        "persona": "You need a confirmed time for launch coordination."
+      }
+    ]
+  },
+  {
+    "id": "social_001",
+    "name": "Coalition formation discussion",
+    "description": "Agents exchange messages and form a coalition around a shared goal",
+    "max_ticks": 3,
+    "termination_condition": "coalition_formed",
+    "parameters": {
+      "message": "Can we coordinate on the shared rollout plan?",
+      "coalition_purpose": "Coordinate rollout dependencies"
+    },
+    "agents": [
+      {
+        "id": "advocate_1",
+        "role": "advocate",
+        "domain": "social",
+        "persona": "You build support for coordinated action."
+      },
+      {
+        "id": "stakeholder_1",
+        "role": "stakeholder",
+        "domain": "social",
+        "persona": "You join coalitions when the purpose is clear."
+      }
+    ]
+  }
+]

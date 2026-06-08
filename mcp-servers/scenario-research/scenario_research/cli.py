@@ -12,11 +12,12 @@ import typer
 from rich import print
 
 import asyncio
+from pathlib import Path
 
 from . import __version__
 from .models import ScenarioRun
 from .router import resolve_endpoint, get_local_inference_config, probe_local_providers
-from .scaffold_adapter import execute_scenario, get_scaffold_root
+from .scaffold_adapter import execute_multi_scenario_configs, execute_scenario, get_scaffold_root
 from .ontology_ingest import (
     ingest_ontology as _ingest_impl,
     search_ontology as _search_impl,
@@ -396,6 +397,44 @@ def run_short(
 ) -> None:
     """Short alias for run."""
     _run_impl(scenario=scenario, agents=agents, steps=steps, seed=seed, ontology=ontology)
+
+
+@app.command("multi-run")
+def multi_run(
+    scenario_file: Path = typer.Argument(..., help="JSON object or array of CAMEL ScenarioConfig objects."),
+    output_dir: Path | None = typer.Option(
+        None,
+        help="Output directory for event and summary artifacts.",
+    ),
+    execution_mode: str = typer.Option(
+        "local",
+        help="local for deterministic CLI runs, camel for configured CAMEL model backends.",
+    ),
+    output_format: str = typer.Option("jsonl", help="jsonl | json | parquet"),
+    parallel: bool = typer.Option(False, help="Run scenarios concurrently in local mode."),
+) -> None:
+    """Run the CAMEL multi-scenario service via the co-located scaffold."""
+    root = get_scaffold_root()
+    if output_dir is None:
+        output_dir = root / "data" / "camel_sim_results"
+
+    from src.camel_sim.config.scenarios import load_scenario_configs  # type: ignore
+
+    configs = load_scenario_configs(scenario_file)
+    payload = execute_multi_scenario_configs(
+        [cfg.model_dump() for cfg in configs],
+        execution_mode=execution_mode,
+        parallel=parallel,
+        output_dir=output_dir,
+        output_format=output_format,  # type: ignore[arg-type]
+    )
+    print(
+        {
+            "scenarios": payload["scenarios"],
+            "execution_mode": payload["execution_mode"],
+            "artifacts": payload["artifacts"],
+        }
+    )
 
 
 @app.command()

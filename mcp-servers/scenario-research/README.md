@@ -34,6 +34,7 @@ uv pip install -e ../../camel-oasis-scaffold
 scenario-research version
 scenario-research health
 scenario-research run info_spread --agents 20 --steps 3
+scenario-research multi-run ../../camel-oasis-scaffold/examples/multi_scenarios.json
 ```
 
 ## Run MCP server
@@ -48,7 +49,7 @@ Register with host (example for Grok; see templates/):
 [mcp_servers.scenario-research]
 command = "uvx"
 args = ["scenario-research-mcp"]
-tool_timeouts = { scenario_research = 3600, run_scenario = 3600 }
+tool_timeouts = { scenario_research = 3600, run_scenario = 3600, run_multi_scenario = 3600 }
 ```
 
 ## Timeouts (two-layer)
