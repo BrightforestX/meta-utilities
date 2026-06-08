@@ -77,12 +77,14 @@ PRs must include updated contract snapshots or new Given/When/Then when behavior
 ## Ontology recall (new first-cut)
 - `scenario-research ingest-ontology --target weaviate` (or `python -m scenario_research.ontology_ingest`)
 - `scenario-research search-ontology "finops"`
+- `scenario-research delete-ontology --name raja_gudepu_ceo` (or bare `delete-ontology MemoryItem`; `--source "oteemo/ontology/..."`; `--entity-type role` (advanced); `--all` (DANGEROUS broad))
 - Walks shared ontology/ + oteemo/ontology/ (roles/policies/tools + LinkML classes/attrs).
 - Maintains `meta_ontology` (configurable via RESEARCH_ONTOLOGY_COLLECTION) + ensures LinkML-derived collections (additive to Surreal).
-- Chunks + embeds + inserts with stable IDs; idempotent clear-by-source for first-cut.
-- Graceful: clear messages if Weaviate or [research] extra absent; disk YAMLs are source of truth.
-- MCP surface: `ingest_ontology`, `search_ontology` (two-layer timeout wrapped).
-- TUI (oteemo-assistant): `ingest ontology`, `show ontology MemoryItem|raja_gudepu_ceo`, `ontology search ...` (cards + markdown; status bar MODE update).
+- Chunks + embeds + inserts with stable IDs; idempotent clear-by-source for first-cut (now DRY via internal delete helper).
+- Standalone deletes now first-class (MCP `delete_ontology`, CLI `delete-ontology`, TUI `delete ontology ...`); previously only implicit side-effect inside ingest.
+- Graceful: clear messages if Weaviate or [research] extra absent; disk YAMLs are source of truth. Deletes affect recall layer only.
+- MCP surface: `ingest_ontology`, `search_ontology`, `delete_ontology` (two-layer timeout wrapped; selectors name/entity_type/source/delete_all).
+- TUI (oteemo-assistant): `ingest ontology`, `show ontology MemoryItem|raja_gudepu_ceo`, `ontology search ...`, `delete ontology raja... | --name X | --source Y | --all (careful)` (cyan delete cards with count + removed names list; status bar MODE "Ontology Delete").
 See ontology_ingest.py + linkml_weaviate.py + oteemo-assistant README for usage + verification.
 
 ## Oteemo billable maximization (example real-org scenario)

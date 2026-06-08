@@ -133,3 +133,6 @@ out/
 
 # Any local Docker volume mounts or data dirs not already covered
 volumes/
+# Strengthen cache ignore for hypothesis (pytest) in subpackages
+**/.hypothesis/
+.hypothesis/

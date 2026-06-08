@@ -29,8 +29,12 @@ from .timeouts import ENV_VAR as TIMEOUT_ENV_VAR, get_timeout_seconds, LONG_RUNN
 from .validation import validate_agent_yaml_text, validate_before_run, validate_run_payload
 
 # Ontology recall (Weaviate first-cut; additive, disk YAMLs remain source of truth)
-from .ontology_ingest import ingest_ontology as _ingest_ontology_impl, search_ontology as _search_ontology_impl
-from . import ontology_ingest as _ontology_ingest_mod  # for health surface + direct CLI entrypoint discovery
+from .ontology_ingest import (
+    ingest_ontology as _ingest_ontology_impl,
+    search_ontology as _search_ontology_impl,
+    delete_ontology as _delete_ontology_impl,
+)
+from . import ontology_ingest as _ontology_ingest_mod  # for health surface + direct CLI entrypoint discovery + COLLECTION + DELETE_TIMEOUT etc.
 
 # Client timeout for long simulation/research loops (OASIS runs + workforce ask)
 # Host (grok/cursor) also sets tool_timeouts[scenario_research_*] (see LONG_RUNNING_TOOLS)
@@ -51,8 +55,9 @@ mcp = FastMCP(
         "Use scenario_research tools for running governed CAMEL-OASIS simulations, fitting mathematical models, "
         "producing costed research reports, and (via batch-orchestrator) scaling replicate ensembles. "
         "All agent roles, tools, policies, and population templates are declared in governed YAML under the ontology layer. "
-        "New: first-class ontology recall via Weaviate (meta_ontology collection) with ingest_ontology + search_ontology. "
+        "New: first-class ontology recall via Weaviate (meta_ontology collection) with ingest_ontology + search_ontology + delete_ontology. "
         "Disk YAMLs (ontology/ + oteemo/ontology/) remain the source of truth; Weaviate is semantic recall/RAG only. "
+        "Deletes are explicit (no longer only implicit side-effect of ingest); selectors by name/entity_type/source prefix or broad (safety in UI/CLI). "
         "LinkML -> Weaviate collections (additive to Surreal path). "
         "Two-layer timeouts: SCENARIO_RESEARCH_TIMEOUT_SEC (client) + host tool_timeouts entry. "
         "PostgreSQL is optional; SQLite is the portable default baseline. "
@@ -77,9 +82,11 @@ async def scenario_research_health(ctx: Context | None = None) -> dict[str, Any]
         "ontology": {
             "ingest_tool": "ingest_ontology",
             "search_tool": "search_ontology",
+            "delete_tool": "delete_ontology",
             "default_collection": "meta_ontology",
             "env_override": "RESEARCH_ONTOLOGY_COLLECTION | WEAVIATE_ONTOLOGY_COLLECTION",
-            "graceful": "if Weaviate/research extra absent: clear msg; disk YAMLs + pure-sim 100% functional",
+            "graceful": "if Weaviate/research extra absent: clear msg; disk YAMLs + pure-sim 100% functional. Deletes now first-class (TUI/CLI/MCP) and DRY-called from ingest.",
+            "selectors": "name (exact), entity_type, source (prefix via like), delete_all (broad, use carefully)",
         },
     }
 
@@ -185,6 +192,38 @@ async def search_ontology(query: str, top_k: int = 5, ctx: Context | None = None
             except Exception:
                 pass
         return [{"error": "timeout"}]
+
+
+@mcp.tool()
+async def delete_ontology(
+    name: str | None = None,
+    entity_type: str | None = None,
+    source: str | None = None,
+    delete_all: bool = False,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """
+    Delete objects from the meta_ontology Weaviate collection (recall layer only; disk YAMLs under ontology/ + oteemo/ontology/ are untouched and remain canonical).
+    Selectors (AND-combined when >1): name (exact match), entity_type (role|policy|tool|class|attribute), source (prefix match, e.g. "oteemo/ontology/agents").
+    delete_all=True (no other selectors) performs broad delete of the collection (DANGEROUS — use only for reset; CLI/TUI surfaces strong warnings).
+    Idempotent: returns deleted=0 if no matches. Returns deleted count + sample of removed 'name' values.
+    Graceful if Weaviate / [research] extra absent (same contract as ingest/search).
+    Two-layer timeout (client SCENARIO_RESEARCH_TIMEOUT_SEC capped short for delete + host tool_timeouts.delete_ontology).
+    Makes deletes first-class / explicit (previously only implicit side-effect inside ingest_ontology for reindex idempotency).
+    """
+    try:
+        async with asyncio.timeout(min(SCENARIO_RESEARCH_TIMEOUT_SEC, 60.0)):
+            return await _delete_ontology_impl(
+                name=name, entity_type=entity_type, source=source, delete_all=delete_all, ctx=ctx
+            )
+    except asyncio.TimeoutError:
+        logger.warning("delete_ontology timed out")
+        if ctx:
+            try:
+                await ctx.error("delete timed out")
+            except Exception:
+                pass
+        return {"ok": False, "error": "timeout", "deleted": 0, "collection": _ontology_ingest_mod.COLLECTION}
 
 
 def main() -> None:

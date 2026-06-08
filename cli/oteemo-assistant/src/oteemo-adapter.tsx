@@ -48,7 +48,8 @@ type Mode =
   | "Command"
   | "Help"
   | "Ontology Reindex"
-  | "Ontology Search";
+  | "Ontology Search"
+  | "Ontology Delete";
 
 type LastRunParams = {
   steps: number;
@@ -99,6 +100,24 @@ function parseIntent(text: string): { kind: string; payload?: any } {
   if (t.startsWith("ontology search ") || t.startsWith("search ontology ")) {
     const q = t.replace(/^ontology search |^search ontology /, "").trim();
     return { kind: "search_ontology", payload: { query: q || t } };
+  }
+  // Delete ontology (first-class; supports bare name after, or --name / --source / --entity-type / --all)
+  if (t.startsWith("delete ontology") || t.startsWith("ontology delete")) {
+    const rest = t.replace(/^delete ontology |^ontology delete /, "").trim();
+    const payload: any = {};
+    if (rest === "--all" || rest.includes("--all")) {
+      payload.delete_all = true;
+    } else if (rest.startsWith("--name ")) {
+      payload.name = rest.replace("--name ", "").trim();
+    } else if (rest.startsWith("--source ")) {
+      payload.source = rest.replace("--source ", "").trim().replace(/^["']|["']$/g, "");
+    } else if (rest.startsWith("--entity-type ") || rest.startsWith("--entity_type ")) {
+      payload.entity_type = rest.replace(/--entity-?type /, "").trim();
+    } else if (rest) {
+      // bare e.g. "delete ontology raja_gudepu_ceo" or "delete ontology MemoryItem" or "delete ontology --name foo" handled above
+      payload.name = rest;
+    }
+    return { kind: "delete_ontology", payload };
   }
   return { kind: "chat", payload: { text } };
 }
@@ -381,12 +400,48 @@ export function OteemoChat() {
     }
   }, []);
 
+  // --- Delete ontology handler (thin: setMode + manager.scenario.call("delete_ontology", ...) + rich result; heavy delete in scenario-research MCP) ---
+  const handleDeleteOntology = useCallback(async (payload: any) => {
+    const mgr = managerRef.current;
+    if (!mgr) return "Manager not ready.";
+    setMode("Ontology Delete");
+    try {
+      const args: any = {};
+      if (payload?.name) args.name = payload.name;
+      if (payload?.entity_type) args.entity_type = payload.entity_type;
+      if (payload?.source) args.source = payload.source;
+      if (payload?.delete_all) args.delete_all = true;
+      const res = await mgr.scenario.call("delete_ontology", args);
+      const parsed = (res && (res as any).content && Array.isArray((res as any).content)) ? (res as any).content[0]?.text : res;
+      let summary = "Ontology delete requested.";
+      let deleted = 0;
+      let removed: string[] = [];
+      try {
+        const j = typeof parsed === "string" ? JSON.parse(parsed) : parsed;
+        if (j && j.ok) {
+          deleted = j.deleted ?? 0;
+          removed = Array.isArray(j.removed) ? j.removed : [];
+          const sel = j.selectors || {};
+          const selStr = [sel.name && `name=${sel.name}`, sel.entity_type && `type=${sel.entity_type}`, sel.source && `source~${sel.source}`, sel.delete_all && "ALL"].filter(Boolean).join(" ");
+          summary = `Deleted ${deleted} from ${j.collection || "meta_ontology"} ${selStr ? `(${selStr})` : ""}`;
+        } else if (j) {
+          summary = `Delete result: ${j.msg || JSON.stringify(j).slice(0, 220)}`;
+          deleted = j.deleted ?? 0;
+          removed = Array.isArray(j.removed) ? j.removed : [];
+        }
+      } catch { /* not json */ }
+      return { kind: "ontology_delete_result", summary, deleted, removed, raw: parsed };
+    } catch (e: any) {
+      return `delete_ontology error (graceful; pure sim + disk YAMLs unaffected): ${String(e)}`;
+    }
+  }, []);
+
   // Stable adapter (deps empty; uses refs + setState for live reactivity without resetting Thread)
   const adapter: ChatModelAdapter = useMemo(() => ({
     async *run({ messages }: { messages: readonly any[] }) {
       const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
       if (!lastUser) {
-        yield { content: [{ type: "text", text: "Oteemo Assistant ready. Type a command (e.g. 'run oteemo 6 --optimize live')." }] };
+        yield { content: [{ type: "text", text: "Oteemo Assistant ready. Type a command (e.g. 'run oteemo 6 --optimize live'). New: 'delete ontology <name | --name X | --source Y | --all (careful)>'." }] };
         return;
       }
       const userText = lastUser.content?.find((p: any) => p.type === "text")?.text?.trim() || "";
@@ -441,7 +496,7 @@ export function OteemoChat() {
         outText = mgr ? "scenario + px (if present) connected. Use 'run oteemo'." : "Manager initializing...";
       } else if (intent.kind === "help") {
         setMode("Help");
-        outText = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help, ingest ontology | reindex ontology, show ontology <MemoryItem|raja_gudepu_ceo|...>, ontology search finops. px pulls surface as LiveBusinessContext (yellow); seed oteemo recs. Ontology results use cards + markdown. Bottom bar shows MODE (incl. Ontology Reindex/Search). Pure sim + disk YAMLs work without Weaviate.";
+        outText = "Commands: run oteemo N [--optimize] [live], re-run N, show report, pull gmail|slack|calendar|salesforce|notion, enrich/live/context/px, validate <yaml or paste>, health, help, ingest ontology | reindex ontology, show ontology <MemoryItem|raja_gudepu_ceo|...>, ontology search finops, delete ontology <name|raja_gudepu_ceo| --name X | --source \"oteemo/ontology/agents\" | --entity-type role | --all (careful)>. px pulls surface as LiveBusinessContext (yellow); seed oteemo recs. Ontology results (incl. delete: count + removed names) use cyan. Bottom bar shows MODE (incl. Ontology Reindex/Search/Delete). Pure sim + disk YAMLs work without Weaviate.";
       } else if (intent.kind === "ingest_ontology") {
         setMode("Ontology Reindex");
         rich = await handleIngestOntology();
@@ -451,17 +506,21 @@ export function OteemoChat() {
         const q = intent.payload?.name || intent.payload?.query || userText;
         rich = await handleShowOntology(q);
         outText = (rich && typeof rich === "object" && rich.summary) ? rich.summary : (typeof rich === "string" ? rich : "Ontology search complete.");
+      } else if (intent.kind === "delete_ontology") {
+        setMode("Ontology Delete");
+        rich = await handleDeleteOntology(intent.payload || {});
+        outText = (rich && typeof rich === "object" && rich.summary) ? rich.summary : (typeof rich === "string" ? rich : "Ontology delete complete.");
       } else {
         setMode("Command");
-        outText = "Unrecognized command. Try 'run oteemo 6 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops'.";
+        outText = "Unrecognized command. Try 'run oteemo 6 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo | --name MemoryItem | --source oteemo/... | --all (careful)'.";
       }
 
       const latency = Date.now() - t0;
       setLastLatencyMs(latency);
 
       const content: any[] = [{ type: "text", text: outText }];
-      if (rich && typeof rich === "object" && (rich.recs || rich.reportMd || rich.liveBusinessContext || rich.ctx || rich.kind === "ontology_result" || rich.hits)) {
-        content.push({ type: "data", data: { kind: rich.kind === "ontology_result" ? "ontology_result" : "oteemo_structured", ...rich, _execLatencyMs: latency } });
+      if (rich && typeof rich === "object" && (rich.recs || rich.reportMd || rich.liveBusinessContext || rich.ctx || rich.kind === "ontology_result" || rich.hits || rich.kind === "ontology_delete_result" || (rich.deleted != null))) {
+        content.push({ type: "data", data: { kind: rich.kind === "ontology_delete_result" ? "ontology_delete_result" : (rich.kind === "ontology_result" ? "ontology_result" : "oteemo_structured"), ...rich, _execLatencyMs: latency } });
       }
       yield { content };
     },
@@ -486,7 +545,7 @@ export function OteemoChat() {
   const OteemoMessage = () => {
     const message = useAuiState((s: any) => s.message);
     const textPart = message.content?.find((p: any) => p.type === "text");
-    const dataPart = message.content?.find((p: any) => p.type === "data" && p.data && (p.data.kind === "oteemo_structured" || p.data.recs || p.data.kind === "ontology_result"));
+    const dataPart = message.content?.find((p: any) => p.type === "data" && p.data && (p.data.kind === "oteemo_structured" || p.data.recs || p.data.kind === "ontology_result" || p.data.kind === "ontology_delete_result" || (p.data.deleted != null)));
     const rich = dataPart?.data || null;
 
     const isUser = message.role === "user";
@@ -529,6 +588,23 @@ export function OteemoChat() {
             ))
           ) : null}
           {rich.raw ? <Text dimColor>{typeof rich.raw === "string" ? rich.raw.slice(0, 200) : JSON.stringify(rich.raw).slice(0, 200)}</Text> : null}
+        </Box>
+      );
+    }
+
+    // Ontology delete results (cyan summary + count + removed names list; consistent style)
+    if (rich && rich.kind === "ontology_delete_result") {
+      return (
+        <Box key={message.id} flexDirection="column" marginBottom={1} paddingX={1}>
+          <Text bold color={isUser ? "blue" : "magenta"}>{message.role}:</Text>
+          {rich.summary ? <Text color="cyan">{rich.summary}</Text> : null}
+          {typeof rich.deleted === "number" ? (
+            <Text color="green">🗑️ Deleted: {rich.deleted}</Text>
+          ) : null}
+          {rich.removed && rich.removed.length > 0 ? (
+            <Text dimColor>Removed: {rich.removed.slice(0, 20).join(", ")}{rich.removed.length > 20 ? " ..." : ""}</Text>
+          ) : null}
+          {rich.raw ? <Text dimColor>{typeof rich.raw === "string" ? rich.raw.slice(0, 220) : JSON.stringify(rich.raw).slice(0, 220)}</Text> : null}
         </Box>
       );
     }
@@ -601,7 +677,7 @@ export function OteemoChat() {
               <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1} paddingY={0} marginBottom={1}>
                 <Text bold color="green">Oteemo context: Raja (CEO/FinOps), Arka (VP Tech/platform), Rod (Fed Delivery), Clifford (Axiom FinOps contractor).</Text>
                 <Text dimColor>Governed by oteemo/ontology/agents/*.yaml (odrs-agents/1). Artifacts under oteemo/reports/.</Text>
-                <Text dimColor>Quick actions: 'run oteemo 12 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'validate', 'health', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops'.</Text>
+                <Text dimColor>Quick actions: 'run oteemo 12 --optimize live', 'pull gmail PEO', 'enrich with live', 'show report', 'validate', 'health', 'help', 'ingest ontology', 'show ontology MemoryItem', 'ontology search finops', 'delete ontology raja_gudepu_ceo', 'delete ontology --source "oteemo/ontology/agents"', 'delete ontology --name MemoryItem'.</Text>
                 <Text dimColor>Ontology recall (Weaviate meta_ontology) + LinkML-&gt;Weaviate additive. Pure sim + disk YAMLs 100% (graceful if no Weaviate or research extra). Bottom bar always explains mode (incl. Ontology Reindex/Search) + model + px + keys.</Text>
               </Box>
             </ThreadPrimitive.Empty>
@@ -619,7 +695,7 @@ export function OteemoChat() {
           <Box borderStyle="round" paddingX={1} marginX={1} flexShrink={0}>
             <Text dimColor>&gt; </Text>
             <ComposerPrimitive.Input
-              placeholder="run oteemo 6 --optimize | pull gmail PEO | enrich | show report | ingest ontology | show ontology MemoryItem | ontology search finops | help"
+              placeholder="run oteemo 6 --optimize | pull gmail PEO | enrich | show report | ingest ontology | show ontology MemoryItem | ontology search finops | delete ontology raja... | --name X | --source Y | --all (careful) | help"
               autoFocus
             />
           </Box>

@@ -41,7 +41,8 @@ Commands in the TUI (exact same surface as before):
 - `re-run 8 --optimize`
 - `enrich with live` / `live context` / `pull gmail PEO` (px signals if available)
 - `show report`, `validate <yaml>`, `health`, `help`
-- **Ontology recall (new)**: `ingest ontology` / `reindex ontology`, `show ontology MemoryItem`, `show ontology raja_gudepu_ceo`, `ontology search finops` (surfaces as cyan cards + Markdown chunks via MCP; graceful if Weaviate absent)
+- **Ontology recall (new)**: `ingest ontology` / `reindex ontology`, `show ontology MemoryItem`, `show ontology raja_gudepu_ceo`, `ontology search finops`
+- **Ontology deletes (first-class, explicit)**: `delete ontology raja_gudepu_ceo` (or bare name), `delete ontology --name MemoryItem`, `delete ontology --source "oteemo/ontology/agents"`, `delete ontology --entity-type role` (advanced), `delete ontology --all` (DANGEROUS broad with warning in help text). Surfaces as cyan delete summary (count + removed names list + selectors) via MCP; status MODE "Ontology Delete"; graceful same as ingest/search. (Previously deletes were only internal side-effect of reindex in ingest.)
 
 ## The Bottom Status Bar (the star of the 2026-06 upgrade)
 
@@ -49,7 +50,7 @@ The bar is implemented with `StatusBarPrimitive.Root / .Status / .ModelName / .M
 
 **Fields (left → right, example):**
 
-- **MODE**: `Pure Simulation` (default, always works) | `Live-Seeded (px)` (after `enrich` or `... live`) | `Report Review` (`show report` / full view) | `Validation` | `Help` | `Command` (catch-all) | `Ontology Reindex` / `Ontology Search` (new; during ingest/show/search). Updates automatically on intent; makes the operating context instantly visible. Bottom bar briefly shows e.g. "MODE: Ontology Reindex".
+- **MODE**: `Pure Simulation` (default, always works) | `Live-Seeded (px)` (after `enrich` or `... live`) | `Report Review` (`show report` / full view) | `Validation` | `Help` | `Command` (catch-all) | `Ontology Reindex` / `Ontology Search` / `Ontology Delete` (new; during ingest/show/search/delete). Updates automatically on intent; makes the operating context instantly visible. Bottom bar briefly shows e.g. "MODE: Ontology Reindex" or "Ontology Delete". Deletes are now using the full oteemo-assistant surface.
 - **MODEL / backend**: `deterministic-sim (oteemo_billable)` today. Prepared for future `local-mlx:...`, `frontier:claude-...`, `px-proxy`, `hybrid`. Shown via `StatusBarPrimitive.ModelName`.
 - **STATUS**: `IDLE` / `RUNNING` / `ERROR` / `CANCELLED` (from `StatusBarPrimitive.Status` + our `isRunning` + last assistant status).
 - **PX**: `live-ok` (px tree detected + built) or `pure-sim` (graceful; pure path is 100% functional and the happy path).
@@ -102,16 +103,17 @@ The assistant can pull **real, up-to-date operating signals** without ever holdi
 
 See also the "Live business context via px-mcp" section in the moved `oteemo/docs/oteemo-billable.md` and the root docs.
 
-## Ontology recall (Weaviate meta_ontology + LinkML target) — first-cut
+## Ontology recall (Weaviate meta_ontology + LinkML target) — first-cut + explicit deletes
 The TUI now controls ontology as a first-class recall layer (additive; disk YAMLs under mcp-servers/scenario-research/ontology/ + oteemo/ontology/ are always the source of truth and git).
-- `ingest ontology` / `reindex ontology`: walks the trees, chunks (role/policy/tool per agents yamls; class/attribute for linkml_data_model), ensures `meta_ontology` (and LinkML-derived odrs_* collections), embeds via shared vector glue, inserts (idempotent clear-by-source first-cut).
+- `ingest ontology` / `reindex ontology`: walks the trees, chunks (role/policy/tool per agents yamls; class/attribute for linkml_data_model), ensures `meta_ontology` (and LinkML-derived odrs_* collections), embeds via shared vector glue, inserts (idempotent clear-by-source first-cut; refactored to call shared delete helper internally for DRY).
 - `show ontology <name>` / `ontology search <q>`: calls search_ontology over the collection; renders as cyan-bordered cards (entity_type + name + source/tags) + MarkdownText snippets.
-- Status bar lights up `MODE: Ontology Reindex` / `Ontology Search` during; graceful "Weaviate not available — ontology sources remain fully functional on disk ... pure-sim unaffected" if no client / [research] extra / store down.
-- CLI surface (Python happy path): `uv --project mcp-servers/scenario-research run scenario-research ingest-ontology --target weaviate` or `python -m scenario_research.ontology_ingest`; `search-ontology "finops"`.
+- **Deletes now first-class and using the oteemo-assistant** (addresses prior observation that deletes were "only internal side-effect inside ingest"): `delete ontology raja_gudepu_ceo` (or just the name), `delete ontology --name MemoryItem`, `delete ontology --source "oteemo/ontology/agents"`, `delete ontology --entity-type role` (advanced), `delete ontology --all` (strong warning surfaced in help + parse). Calls manager.scenario.call("delete_ontology", {name?, entity_type?, source?, delete_all?}); sets MODE "Ontology Delete"; renders rich result (cyan summary + deleted count + list of removed names + selectors) using data-part + OteemoMessage pattern. Idempotent, graceful, two-layer timeout.
+- Status bar lights up `MODE: Ontology Reindex` / `Ontology Search` / `Ontology Delete` during; graceful "Weaviate not available — ontology sources remain fully functional on disk ... pure-sim unaffected" if no client / [research] extra / store down. Same contract for delete.
+- CLI surface (Python happy path): `uv --project mcp-servers/scenario-research run scenario-research ingest-ontology --target weaviate` ... ; `search-ontology "finops"`; `delete-ontology --name raja_gudepu_ceo` (positional name ok), `--source ...`, `--all`.
 - LinkML extension: linkml_weaviate.ensure_weaviate_collections_from_linkml (maps attrs -> TEXT / TEXT_ARRAY; additive to Surreal; invoked on LinkML during ingest).
-- All via existing MCP manager.call + two-layer timeout (SCENARIO_RESEARCH_TIMEOUT_SEC). Pure sim / prior flows 100% unaffected.
+- All via existing MCP manager.call + two-layer timeout (SCENARIO_RESEARCH_TIMEOUT_SEC). Pure sim / prior flows 100% unaffected. Deletes affect Weaviate recall only.
 
-See updated scenario-research README + oteemo-billable.md for details. Follow-ups (better chunking, instance data in odrs_* colls) tracked in UI recs.
+See updated scenario-research README + oteemo-billable.md for details. Follow-ups (better chunking, instance data in odrs_* colls, TUI confirm for --all) tracked in UI recs.
 
 ## Architecture notes
 

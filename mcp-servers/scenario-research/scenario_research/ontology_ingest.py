@@ -29,7 +29,7 @@ Also exposes ensure_weaviate_collections_from_linkml (additive to Surreal path i
 Used internally on LinkML files during ingest, or callable separately.
 
 CLI: python -m scenario_research.ontology_ingest   or via `scenario-research ingest-ontology --target weaviate`
-MCP: ingest_ontology(target="weaviate", paths=None), search_ontology(query, top_k=5)
+MCP: ingest_ontology(target="weaviate", paths=None), search_ontology(query, top_k=5), delete_ontology(name?, entity_type?, source?, delete_all=False)
 """
 from __future__ import annotations
 
@@ -57,6 +57,9 @@ try:
     INGEST_TIMEOUT_SEC: float = get_timeout_seconds()
 except Exception:
     INGEST_TIMEOUT_SEC = 300.0  # shorter for ingest vs full sims
+
+# Dedicated short timeout for delete (fast op, but respect two-layer)
+DELETE_TIMEOUT_SEC: float = 60.0
 
 # --- Collection name (portable, overridable) ---
 DEFAULT_COLLECTION = "meta_ontology"
@@ -340,19 +343,16 @@ async def _ingest_impl(target: str = "weaviate", paths: list[str] | None = None,
     embedder = get_embedder()
 
     # Idempotency: clear objects for the sources we are about to (re)index
+    # Refactored to _delete_by_filter for DRY (standalone delete_ontology reuses same).
     coll = client.collections.get(COLLECTION)
     cleared = 0
     for root in roots:
         try:
-            # delete by source prefix match (first-cut; weaviate Filter supports equal/contains)
-            # Use Filter.by_property("source").like( f"*{ _rel_to_pkg(root) }*" ) but to keep simple use contains or per-file
-            # For robustness, delete where source contains a marker from this tree
             marker = _rel_to_pkg(root)
-            # v4 delete_many with where
             from weaviate.classes.query import Filter  # type: ignore
             filt = Filter.by_property("source").like(f"*{marker}*")
-            res = coll.data.delete_many(where=filt)
-            cleared += getattr(res, "successful", 0) or 0
+            dres = _delete_by_filter(coll, filt)
+            cleared += dres.get("deleted", 0) or 0
         except Exception as e:
             logger.warning(f"delete prior for {root} (non-fatal): {e}")
 
@@ -474,6 +474,135 @@ async def search_ontology(query: str, top_k: int = 5, ctx: Any | None = None) ->
             except Exception:
                 pass
         return [{"error": "timeout"}]
+
+
+# --- Delete helper (internal, DRY for ingest clear + standalone delete_ontology) ---
+# Uses same Filter patterns + client/ensure as ingest/search for consistency.
+# Fetches matching names first (best-effort, capped) then delete_many for count + list.
+def _delete_by_filter(coll: Any, where: Any | None) -> dict[str, Any]:
+    """Delete by (optional) Weaviate Filter; returns {'deleted': int, 'removed': list[str]}.
+    Safe for idempotent no-op (0 if nothing matches). Broad where=None deletes all in coll.
+    """
+    removed: list[str] = []
+    deleted = 0
+    try:
+        # Best-effort name capture before delete (limit to keep first-cut reasonable)
+        if where is not None:
+            q = coll.query.fetch_objects(where=where, limit=500, return_properties=["name"])
+            removed = [str(o.properties.get("name") or "") for o in q.objects if o.properties.get("name")]
+        else:
+            # Broad: sample names (do not enumerate millions in first-cut)
+            q = coll.query.fetch_objects(limit=100, return_properties=["name"])
+            removed = [str(o.properties.get("name") or "") for o in q.objects if o.properties.get("name")]
+        res = coll.data.delete_many(where=where) if where is not None else coll.data.delete_many()
+        deleted = getattr(res, "successful", 0) or len(removed) or 0
+    except Exception as e:
+        logger.warning(f"delete_by_filter non-fatal: {e}")
+    return {"deleted": deleted, "removed": removed}
+
+
+async def _delete_impl(
+    name: str | None = None,
+    entity_type: str | None = None,
+    source: str | None = None,
+    delete_all: bool = False,
+    ctx: Any | None = None,
+) -> dict[str, Any]:
+    """Core delete for meta_ontology (and ready for LinkML-derived if passed collection).
+    Selectors AND-combined when multiple. source treated as prefix (like *src*).
+    delete_all=True with no selectors = broad delete (caller must warn).
+    Graceful, idempotent, returns deleted + removed names sample.
+    """
+    client = _get_weaviate_client()
+    if client is None or not _ensure_weaviate_collection(client, COLLECTION, properties=None):
+        disk_note = "ontology sources remain fully functional on disk under mcp-servers/scenario-research/ontology/ and oteemo/ontology/"
+        return {
+            "ok": False,
+            "weaviate_available": False,
+            "collection": COLLECTION,
+            "deleted": 0,
+            "removed": [],
+            "msg": f"Weaviate not available — {disk_note}; pure-sim unaffected. Install with uv pip install -e '.[research]' and ensure WEAVIATE_URL.",
+            "selectors": {"name": name, "entity_type": entity_type, "source": source, "delete_all": delete_all},
+        }
+
+    coll = client.collections.get(COLLECTION)
+    from weaviate.classes.query import Filter  # type: ignore
+
+    filters: list[Any] = []
+    if name:
+        filters.append(Filter.by_property("name").equal(name))
+    if entity_type:
+        filters.append(Filter.by_property("entity_type").equal(entity_type))
+    if source:
+        # prefix/contains match, matching prior ingest clear behavior
+        filters.append(Filter.by_property("source").like(f"*{source}*"))
+
+    where: Any | None = None
+    if filters:
+        where = filters[0]
+        for f in filters[1:]:
+            where = where & f
+    elif not delete_all:
+        try:
+            client.close()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "weaviate_available": True,
+            "collection": COLLECTION,
+            "deleted": 0,
+            "removed": [],
+            "msg": "No selector provided. Use name=, entity_type=, or source= (prefix). Or delete_all=True for broad (DANGEROUS).",
+            "selectors": {"name": name, "entity_type": entity_type, "source": source, "delete_all": delete_all},
+        }
+
+    # Perform (names captured inside helper for the where)
+    dres = _delete_by_filter(coll, where)
+
+    try:
+        client.close()
+    except Exception:
+        pass
+
+    if ctx:
+        try:
+            await ctx.info(f"ontology delete complete: {dres['deleted']} removed from {COLLECTION}")
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "collection": COLLECTION,
+        "deleted": dres["deleted"],
+        "removed": dres.get("removed", [])[:50],  # cap for render safety
+        "selectors": {"name": name, "entity_type": entity_type, "source": source, "delete_all": delete_all},
+        "msg": f"meta_ontology delete done (deleted {dres['deleted']}); disk YAMLs + pure-sim unaffected (Weaviate is recall only)",
+        "weaviate_available": True,
+    }
+
+
+async def delete_ontology(
+    name: str | None = None,
+    entity_type: str | None = None,
+    source: str | None = None,
+    delete_all: bool = False,
+    ctx: Any | None = None,
+) -> dict[str, Any]:
+    """Public entry (MCP/CLI/TUI). Respects two-layer timeout (client here; shorter for delete)."""
+    try:
+        async with asyncio.timeout(DELETE_TIMEOUT_SEC):
+            return await _delete_impl(name=name, entity_type=entity_type, source=source, delete_all=delete_all, ctx=ctx)
+    except asyncio.TimeoutError:
+        logger.warning("delete_ontology timed out after %ss", DELETE_TIMEOUT_SEC)
+        if ctx:
+            try:
+                await ctx.error(f"timeout after {DELETE_TIMEOUT_SEC}s")
+            except Exception:
+                pass
+        return {"ok": False, "error": "timeout", "deleted": 0, "collection": COLLECTION}
+
 
 # --- Re-export LinkML Weaviate for callers (additive) ---
 try:

@@ -17,7 +17,12 @@ from . import __version__
 from .models import ScenarioRun
 from .router import resolve_endpoint
 from .scaffold_adapter import execute_scenario, get_scaffold_root
-from .ontology_ingest import ingest_ontology as _ingest_impl, search_ontology as _search_impl, COLLECTION as _ONTOLOGY_COLLECTION
+from .ontology_ingest import (
+    ingest_ontology as _ingest_impl,
+    search_ontology as _search_impl,
+    delete_ontology as _delete_impl,
+    COLLECTION as _ONTOLOGY_COLLECTION,
+)
 
 app = typer.Typer(help="ODRS scenario-research (extends camel-oasis-scaffold)")
 
@@ -94,6 +99,29 @@ def search_ontology(
     Falls back to graceful message if Weaviate unavailable (sources on disk are canonical).
     """
     res = asyncio.run(_search_impl(query=query, top_k=top_k))
+    print(res)
+
+
+@app.command("delete-ontology")
+def delete_ontology(
+    target: str | None = typer.Argument(None, help="If no --flags: treated as --name value (convenience, e.g. scenario-research delete-ontology raja_gudepu_ceo)"),
+    name: str | None = typer.Option(None, "--name", help="Exact name match (e.g. raja_gudepu_ceo or MemoryItem)"),
+    entity_type: str | None = typer.Option(None, "--entity-type", help="e.g. role | policy | tool | class | attribute (advanced; use with care)"),
+    source: str | None = typer.Option(None, "--source", help="Source prefix match (e.g. oteemo/ontology/agents or ontology/)"),
+    all_for_source: bool = typer.Option(False, "--all-for-source", help="Convenience for source-based broad clear (same effect as --source with prefix)"),
+    delete_all: bool = typer.Option(False, "--all", help="BROAD DELETE ALL objects in meta_ontology (DANGEROUS — no filter; disk YAMLs untouched but recall layer reset)"),
+) -> None:
+    """Delete from Weaviate meta_ontology recall layer (explicit, first-class; was previously only implicit reindex side-effect inside ingest).
+    Selectors are AND-combined. source is prefix (like *src*). Idempotent (deleted=0 if no match).
+    Graceful if Weaviate or [research] extra absent (sources on disk remain canonical; pure-sim unaffected).
+    Two-layer timeout protected.
+    """
+    n = name or target
+    eff_source = source
+    eff_delete_all = delete_all or all_for_source
+    res = asyncio.run(
+        _delete_impl(name=n, entity_type=entity_type, source=eff_source, delete_all=eff_delete_all)
+    )
     print(res)
 
 
