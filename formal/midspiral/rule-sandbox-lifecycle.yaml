@@ -1,0 +1,9 @@
+id: rule-sandbox-lifecycle-sdk
+name: sandbox-lifecycle-sdk-first
+description: Daytona sandbox create/bootstrap/exec/delete must use @daytona/sdk or AsyncDaytona, never provider.sh.
+category: infrastructure
+status: active
+surrealql_assertion: sandbox_provider == 'daytona' AND sdk_path == true AND shell_provider_sh == false
+midspiral:
+  tool: verify-rules
+  engines: [business]
