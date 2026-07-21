@@ -1,0 +1,11 @@
+id: rule-claim-check-metric
+name: claim-check-metric-defensible
+description: Resume or docs metric claims must map to a metrics-registry entry with defensibility verified|estimated|projected.
+category: compliance
+status: active
+surrealql_assertion: claim_has_registry_id == true AND defensibility IN ('verified', 'estimated', 'projected')
+midspiral:
+  tool: verify-rules
+  engines: [business, consistency]
+claim_check:
+  required_fields: [metric_id, defensibility, source]
